@@ -5,7 +5,7 @@ st.set_page_config(page_title="週間献立アプリ", page_icon="🍽️", layo
 st.title("🍽️ 週間献立自動作成アプリ")
 st.caption("家族4人（父・母・息子6歳・娘3歳）向け")
 
-api_key = st.sidebar.text_input("Claude APIキーを入力", type="password")
+api_key = st.secrets.get("ANTHROPIC_API_KEY", "") or st.sidebar.text_input("Claude APIキーを入力", type="password")
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 設定")
 exclude_foods = st.sidebar.text_input("除外したい食材（例：セロリ、ピーマン）")
