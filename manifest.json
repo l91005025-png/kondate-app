@@ -1,0 +1,16 @@
+{
+  "name": "週間献立",
+  "short_name": "献立",
+  "description": "家族で共有する週間献立アプリ",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7FAF7",
+  "theme_color": "#16A34A",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

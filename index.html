@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<!--
+  ============================================================
+  週間献立アプリ（PWA） - index.html
+  - GitHub Pages でホスト、Firestore に家族共有データを保存
+  - AI は Gemini API（無料枠）を BYOK（自分のキー）で利用
+  - 家族コード方式（Anonymous Auth）。家族で同じコードを共有
+  ============================================================
+-->
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#16A34A" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="icon.png" />
+  <link rel="apple-touch-icon" href="icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="献立" />
+  <title>週間献立</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+      background: #F7FAF7; color: #14532D;
+      font-size: 16px; line-height: 1.5;
+    }
+    button { font-family: inherit; cursor: pointer; }
+    input, select, textarea { font-family: inherit; font-size: 16px; }
+
+    /* ============ ログイン ============ */
+    #loginScreen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .login-card { background: #fff; width: 100%; max-width: 420px; border-radius: 20px; padding: 28px 24px; box-shadow: 0 10px 30px rgba(20,83,45,0.10); }
+    .login-card .logo { text-align: center; font-size: 48px; margin-bottom: 8px; }
+    .login-card h1 { margin: 0 0 4px; font-size: 24px; color: #16A34A; text-align: center; }
+    .login-card p.sub { margin: 0 0 24px; color: #64748B; font-size: 13px; text-align: center; }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 6px; }
+    .form-group .hint { display: block; font-size: 11px; color: #94A3B8; margin-top: 4px; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 12px 14px; border: 1px solid #CBD5E1; border-radius: 10px; background: #fff; transition: border-color 0.15s;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+      outline: none; border-color: #16A34A; box-shadow: 0 0 0 3px rgba(22,163,74,0.12);
+    }
+    .form-group textarea { min-height: 80px; resize: vertical; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-height: 52px; padding: 0 20px; border: none; border-radius: 12px;
+      background: #16A34A; color: #fff; font-size: 16px; font-weight: 700;
+      transition: background 0.15s, transform 0.05s; width: 100%;
+    }
+    .btn:hover { background: #15803D; }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { background: #94A3B8; cursor: not-allowed; }
+    .btn.secondary { background: #fff; color: #16A34A; border: 1px solid #BBF7D0; }
+    .btn.secondary:hover { background: #F0FDF4; }
+    .btn.danger { background: #DC2626; } .btn.danger:hover { background: #B91C1C; }
+    .btn.small { min-height: 38px; padding: 0 12px; font-size: 13px; width: auto; border-radius: 8px; }
+    .btn.ghost { background: transparent; color: #64748B; border: 1px solid #E2E8F0; }
+    .btn.ghost:hover { background: #F8FAFC; }
+
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    .btn.secondary .spinner, .btn.ghost .spinner { border-color: rgba(22,163,74,0.3); border-top-color: #16A34A; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ============ メイン画面 ============ */
+    #app { display: none; min-height: 100vh; padding-bottom: 80px; }
+    .topbar { background: #16A34A; color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
+    .topbar h1 { margin: 0; font-size: 18px; }
+    .topbar .user-info { font-size: 12px; opacity: 0.95; }
+    .topbar button { background: rgba(255,255,255,0.18); color: #fff; border: none; padding: 6px 12px; border-radius: 8px; font-size: 13px; }
+
+    .container { padding: 16px; max-width: 800px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 16px; padding: 18px; box-shadow: 0 2px 8px rgba(20,83,45,0.05); margin-bottom: 16px; }
+    .card h2 { margin: 0 0 12px; font-size: 16px; color: #14532D; }
+    .card .sub-title { color: #64748B; font-size: 13px; margin: -8px 0 12px; }
+
+    /* ============ タブバー ============ */
+    .tabbar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #DCFCE7; display: grid; grid-template-columns: repeat(5, 1fr); z-index: 10; box-shadow: 0 -2px 10px rgba(20,83,45,0.04); padding-bottom: env(safe-area-inset-bottom); }
+    .tabbar button { padding: 8px 4px 10px; border: none; background: transparent; color: #64748B; font-size: 11px; font-weight: 600; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 56px; }
+    .tabbar button.active { color: #16A34A; }
+    .tabbar button .ico { font-size: 20px; line-height: 1; }
+
+    /* ============ 献立カード ============ */
+    .week-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .week-header .week-title { font-size: 14px; color: #334155; font-weight: 600; }
+    .week-nav { display: flex; gap: 6px; }
+    .week-nav button { width: 36px; height: 36px; border-radius: 8px; border: 1px solid #DCFCE7; background: #F0FDF4; color: #16A34A; font-size: 14px; padding: 0; }
+    .week-nav button:disabled { opacity: 0.4; }
+
+    .day-card { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; border-left: 4px solid #BBF7D0; box-shadow: 0 1px 4px rgba(20,83,45,0.04); }
+    .day-card.today { border-left-color: #16A34A; background: #F0FDF4; }
+    .day-card .day-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .day-card .day-name { font-weight: 700; color: #14532D; font-size: 15px; }
+    .day-card .day-date { font-size: 12px; color: #64748B; }
+    .day-card .meal-block { margin-top: 10px; }
+    .day-card .meal-block:first-of-type { margin-top: 0; }
+    .day-card .meal-label { font-size: 11px; color: #16A34A; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .day-card .dish { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #F8FAFC; border-radius: 8px; margin-top: 4px; gap: 8px; }
+    .day-card .dish-name { flex: 1; font-size: 14px; }
+    .day-card .dish.main .dish-name { font-weight: 600; }
+    .day-card .dish-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .dish-actions button { border: none; background: transparent; padding: 4px 6px; border-radius: 6px; font-size: 16px; color: #64748B; }
+    .dish-actions button:hover { background: #E2E8F0; }
+    .dish-actions button.fav.active { color: #F59E0B; }
+    .day-actions { display: flex; gap: 6px; margin-top: 10px; justify-content: flex-end; }
+
+    /* ============ 買い物リスト ============ */
+    .shopping-section { margin-bottom: 16px; }
+    .shopping-section h3 { font-size: 13px; color: #16A34A; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .shopping-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #F8FAFC; border-radius: 10px; margin-bottom: 6px; }
+    .shopping-item input[type="checkbox"] { width: 22px; height: 22px; accent-color: #16A34A; flex-shrink: 0; }
+    .shopping-item .item-text { flex: 1; }
+    .shopping-item.checked .item-text { text-decoration: line-through; color: #94A3B8; }
+    .shopping-item .item-name { font-size: 14px; font-weight: 600; }
+    .shopping-item .item-amount { font-size: 12px; color: #64748B; }
+
+    /* ============ レシピモーダル ============ */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: flex-end; justify-content: center; z-index: 100; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: #fff; width: 100%; max-width: 600px; max-height: 90vh; border-radius: 20px 20px 0 0; overflow-y: auto; padding: 20px; }
+    @media (min-width: 600px) {
+      .modal-overlay { align-items: center; }
+      .modal { border-radius: 20px; max-height: 85vh; }
+    }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 8px; }
+    .modal-header h2 { margin: 0; font-size: 18px; color: #14532D; flex: 1; }
+    .modal-close { background: #F1F5F9; border: none; width: 32px; height: 32px; border-radius: 50%; font-size: 18px; color: #64748B; }
+    .recipe-section { margin-bottom: 16px; }
+    .recipe-section h3 { font-size: 13px; color: #16A34A; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .recipe-section ul, .recipe-section ol { margin: 0; padding-left: 20px; }
+    .recipe-section li { margin-bottom: 4px; font-size: 14px; }
+    .recipe-meta { display: flex; gap: 12px; font-size: 12px; color: #64748B; margin-bottom: 12px; }
+    .recipe-meta span { background: #F0FDF4; padding: 4px 8px; border-radius: 6px; color: #16A34A; font-weight: 600; }
+
+    /* ============ お気に入り / 履歴 ============ */
+    .list-item { background: #fff; border-radius: 12px; padding: 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; box-shadow: 0 1px 4px rgba(20,83,45,0.04); }
+    .list-item .info { flex: 1; min-width: 0; }
+    .list-item .title { font-weight: 600; color: #14532D; font-size: 15px; }
+    .list-item .meta { font-size: 12px; color: #64748B; margin-top: 2px; }
+    .list-item .actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+    /* ============ 設定 ============ */
+    .member-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 6px; margin-bottom: 6px; align-items: center; }
+    .member-row input { padding: 8px 10px; font-size: 14px; }
+    .member-row button { background: #FEE2E2; color: #DC2626; border: none; width: 32px; height: 32px; border-radius: 8px; font-size: 14px; padding: 0; }
+
+    /* ============ 共通 ============ */
+    .empty-state { text-align: center; padding: 40px 20px; color: #94A3B8; }
+    .empty-state .ico { font-size: 48px; margin-bottom: 12px; }
+    .empty-state .msg { font-size: 14px; }
+    .empty-state .btn { margin-top: 16px; max-width: 260px; }
+
+    .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(100px); background: #14532D; color: #fff; padding: 12px 20px; border-radius: 12px; font-size: 14px; z-index: 200; opacity: 0; transition: all 0.3s; box-shadow: 0 4px 16px rgba(0,0,0,0.2); max-width: 90%; text-align: center; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.error { background: #DC2626; }
+
+    .loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 16px; z-index: 150; }
+    .loading-overlay.show { display: flex; }
+    .loading-overlay .big-spinner { width: 48px; height: 48px; border: 4px solid #DCFCE7; border-top-color: #16A34A; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .loading-overlay .msg { font-size: 14px; color: #14532D; font-weight: 600; }
+
+    .tag { display: inline-block; background: #F0FDF4; color: #16A34A; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; margin-right: 4px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .text-center { text-align: center; }
+    .mt-8 { margin-top: 8px; } .mt-16 { margin-top: 16px; }
+    .hidden { display: none !important; }
+
+    .api-warning { background: #FEF3C7; border: 1px solid #FCD34D; color: #92400E; padding: 12px; border-radius: 10px; margin-bottom: 12px; font-size: 13px; }
+    .api-warning a { color: #B45309; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<!-- ============ ログイン画面 ============ -->
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="logo">🍽️</div>
+    <h1>週間献立</h1>
+    <p class="sub">家族で共有する献立アプリ</p>
+
+    <div class="form-group">
+      <label>家族コード</label>
+      <input type="text" id="familyCodeInput" placeholder="例: tanaka-2026" autocomplete="off" />
+      <span class="hint">家族で同じコードを共有してください（半角英数とハイフン、4文字以上）</span>
+    </div>
+
+    <div class="form-group">
+      <label>あなたの名前</label>
+      <input type="text" id="memberNameInput" placeholder="例: ママ" autocomplete="off" />
+    </div>
+
+    <button class="btn" id="loginBtn">はじめる</button>
+    <p class="hint mt-8 text-center" style="color:#94A3B8; font-size:11px;">初回はコードが新規作成され、2回目以降はそのコードでログインします</p>
+  </div>
+</div>
+
+<!-- ============ アプリ本体 ============ -->
+<div id="app">
+  <div class="topbar">
+    <div>
+      <h1 id="topTitle">🍽️ 今週の献立</h1>
+      <div class="user-info" id="topUserInfo"></div>
+    </div>
+    <button id="logoutBtn">ログアウト</button>
+  </div>
+
+  <div class="container">
+
+    <!-- ===== 献立タブ ===== -->
+    <section id="page-menu" class="page">
+      <div class="week-header">
+        <div class="week-title" id="weekTitle">読み込み中...</div>
+        <div class="week-nav">
+          <button id="prevWeekBtn" title="前の週">‹</button>
+          <button id="thisWeekBtn" title="今週">今週</button>
+          <button id="nextWeekBtn" title="次の週">›</button>
+        </div>
+      </div>
+
+      <div id="menuContainer"></div>
+
+      <div id="menuEmpty" class="empty-state hidden">
+        <div class="ico">🍳</div>
+        <div class="msg">この週の献立はまだありません</div>
+        <button class="btn mt-16" id="openGenerateBtn">献立を生成する</button>
+      </div>
+    </section>
+
+    <!-- ===== 生成タブ ===== -->
+    <section id="page-generate" class="page hidden">
+      <div id="apiKeyWarning" class="api-warning hidden">
+        ⚠️ Gemini API キーが未設定です。<a href="#" id="goToSettingsFromWarn">設定タブ</a>で登録してください（無料で取得できます）
+      </div>
+
+      <div class="card">
+        <h2>🍽️ 献立を生成</h2>
+        <p class="sub-title">家族構成・除外食材は設定タブのプロフィールが自動で使われます</p>
+
+        <div class="form-group">
+          <label>対象の週</label>
+          <select id="genWeekSelect">
+            <option value="this">今週（月〜日）</option>
+            <option value="next">来週（月〜日）</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>含める食事</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="mealBreakfast" /> 朝食</label>
+            <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="mealLunch" /> 昼食</label>
+            <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="mealDinner" checked /> 夕食</label>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>調理時間の目安</label>
+            <select id="genTime">
+              <option value="">指定なし</option>
+              <option value="20分以内">20分以内</option>
+              <option value="30分以内">30分以内</option>
+              <option value="45分以内">45分以内</option>
+              <option value="1時間以内">1時間以内</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>今回だけ除外する食材</label>
+            <input type="text" id="genExcludeOnce" placeholder="例: 鶏肉" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>追加リクエスト（任意）</label>
+          <textarea id="genExtraRequest" placeholder="例: 和食多めで、金曜はパーティー風"></textarea>
+        </div>
+
+        <button class="btn" id="generateBtn">✨ 献立を生成する</button>
+        <p class="hint mt-8 text-center" style="color:#94A3B8; font-size:11px;">お気に入りに登録した料理が候補として優先されます</p>
+      </div>
+    </section>
+
+    <!-- ===== 買い物タブ ===== -->
+    <section id="page-shopping" class="page hidden">
+      <div class="week-header">
+        <div class="week-title" id="shoppingWeekTitle">読み込み中...</div>
+        <button class="btn small ghost" id="clearCheckedBtn">✓を全てクリア</button>
+      </div>
+      <div id="shoppingContainer"></div>
+      <div id="shoppingEmpty" class="empty-state hidden">
+        <div class="ico">🛒</div>
+        <div class="msg">この週の買い物リストはまだありません</div>
+      </div>
+    </section>
+
+    <!-- ===== お気に入り ===== -->
+    <section id="page-favorites" class="page hidden">
+      <h2 style="margin:0 0 12px; font-size:16px;">⭐ お気に入りレシピ</h2>
+      <div id="favoritesContainer"></div>
+      <div id="favoritesEmpty" class="empty-state hidden">
+        <div class="ico">⭐</div>
+        <div class="msg">お気に入りに登録した料理がここに表示されます</div>
+      </div>
+    </section>
+
+    <!-- ===== 設定 ===== -->
+    <section id="page-settings" class="page hidden">
+      <div class="card">
+        <h2>👨‍👩‍👧‍👦 家族プロフィール</h2>
+        <p class="sub-title">献立生成の前提として使われます</p>
+
+        <div class="form-group">
+          <label>メンバー</label>
+          <div id="membersList"></div>
+          <button class="btn ghost small mt-8" id="addMemberBtn">＋ メンバー追加</button>
+        </div>
+
+        <div class="form-group">
+          <label>嫌いな食材・アレルギー（常時除外）</label>
+          <input type="text" id="profileExclude" placeholder="例: セロリ、ピーマン、エビ" />
+        </div>
+
+        <div class="form-group">
+          <label>好み・備考</label>
+          <textarea id="profileNotes" placeholder="例: 和食が好き、辛い物は苦手、平日は時短重視"></textarea>
+        </div>
+
+        <button class="btn" id="saveProfileBtn">プロフィールを保存</button>
+      </div>
+
+      <div class="card">
+        <h2>🔑 Gemini API キー</h2>
+        <p class="sub-title">この端末のブラウザにのみ保存されます（家族と共有はされません）</p>
+
+        <div class="form-group">
+          <label>APIキー</label>
+          <input type="password" id="apiKeyInput" placeholder="AIza..." />
+          <span class="hint">
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:#16A34A; font-weight:600;">Google AI Studio</a>
+            で無料取得できます
+          </span>
+        </div>
+
+        <div class="form-group">
+          <label>使用モデル</label>
+          <select id="modelSelect">
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash（推奨・無料枠）</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash（無料枠）</option>
+          </select>
+        </div>
+
+        <button class="btn" id="saveApiKeyBtn">APIキーを保存</button>
+      </div>
+
+      <div class="card">
+        <h2>🏠 家族コード</h2>
+        <p class="sub-title">他の家族メンバーに共有する場合にお使いください</p>
+        <div style="background:#F0FDF4; padding:14px; border-radius:10px; text-align:center; font-size:20px; font-weight:700; color:#16A34A; letter-spacing:1px;" id="familyCodeDisplay"></div>
+        <button class="btn secondary mt-8" id="copyFamilyCodeBtn">コードをコピー</button>
+      </div>
+
+      <div class="card">
+        <h2>📚 履歴</h2>
+        <p class="sub-title">過去に生成した献立</p>
+        <div id="historyContainer"></div>
+        <div id="historyEmpty" class="text-center" style="color:#94A3B8; padding:20px; font-size:13px;">履歴はまだありません</div>
+      </div>
+    </section>
+
+  </div>
+
+  <nav class="tabbar">
+    <button data-tab="menu" class="active"><span class="ico">📅</span>献立</button>
+    <button data-tab="generate"><span class="ico">✨</span>生成</button>
+    <button data-tab="shopping"><span class="ico">🛒</span>買い物</button>
+    <button data-tab="favorites"><span class="ico">⭐</span>お気に入り</button>
+    <button data-tab="settings"><span class="ico">⚙️</span>設定</button>
+  </nav>
+</div>
+
+<!-- ===== レシピモーダル ===== -->
+<div class="modal-overlay" id="recipeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="recipeModalTitle"></h2>
+      <button class="modal-close" id="recipeModalClose">×</button>
+    </div>
+    <div id="recipeModalBody"></div>
+  </div>
+</div>
+
+<!-- ===== ローディング ===== -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="big-spinner"></div>
+  <div class="msg" id="loadingMsg">献立を考えています...</div>
+</div>
+
+<!-- ===== トースト ===== -->
+<div class="toast" id="toast"></div>
+
+<!-- ============ Firebase + アプリロジック ============ -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, query, where, orderBy, limit, getDocs, onSnapshot,
+  serverTimestamp, deleteField
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+// ============================================================
+// Firebase 設定（後で書き換える箇所）
+// ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyB-jcr8IMJkJ7JXGlqwhmB9qLm6jxj_1ls",
+  authDomain: "kondate-app-85053.firebaseapp.com",
+  projectId: "kondate-app-85053",
+  storageBucket: "kondate-app-85053.firebasestorage.app",
+  messagingSenderId: "721800585568",
+  appId: "1:721800585568:web:dc94196f710f7342aebe05"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ============================================================
+// 状態
+// ============================================================
+const state = {
+  uid: null,
+  familyId: null,
+  memberName: null,
+  profile: { members: [], exclude: '', notes: '' },
+  currentWeekStart: null,    // 'YYYY-MM-DD' (月曜日)
+  currentMenu: null,         // 表示中の週の献立
+  unsubMenu: null,           // Firestore リスナー解除関数
+  unsubFavorites: null,
+  unsubHistory: null,
+  favorites: [],
+  history: []
+};
+
+// ============================================================
+// ヘルパー
+// ============================================================
+const $ = (id) => document.getElementById(id);
+const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const fmtMD = (s) => { const [y,m,d] = s.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+const fmtJP = (s) => { const [y,m,d] = s.split('-'); return `${y}年${parseInt(m)}月${parseInt(d)}日`; };
+const DAY_NAMES = ['日','月','火','水','木','金','土'];
+const WEEKDAYS_LONG = ['月曜日','火曜日','水曜日','木曜日','金曜日','土曜日','日曜日'];
+
+function getMondayOf(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=日, 1=月, ..., 6=土
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d;
+}
+function addDays(date, n) { const d = new Date(date); d.setDate(d.getDate()+n); return d; }
+function todayStr() { return fmtDate(new Date()); }
+
+function showToast(msg, isError=false) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+function showLoading(msg) { $('loadingMsg').textContent = msg; $('loadingOverlay').classList.add('show'); }
+function hideLoading() { $('loadingOverlay').classList.remove('show'); }
+
+function sanitizeFamilyCode(s) {
+  return (s||'').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+}
+
+// ============================================================
+// 認証 + 家族コード処理
+// ============================================================
+$('loginBtn').addEventListener('click', async () => {
+  const code = sanitizeFamilyCode($('familyCodeInput').value);
+  const name = ($('memberNameInput').value || '').trim();
+  if (code.length < 4) { showToast('家族コードは4文字以上の半角英数で', true); return; }
+  if (!name) { showToast('名前を入力してください', true); return; }
+
+  try {
+    showLoading('ログイン中...');
+    await signInAnonymously(auth);
+    // onAuthStateChanged で続きを処理
+    localStorage.setItem('familyId', code);
+    localStorage.setItem('memberName', name);
+  } catch (e) {
+    hideLoading();
+    showToast('ログイン失敗: ' + e.message, true);
+  }
+});
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    $('loginScreen').style.display = 'flex';
+    $('app').style.display = 'none';
+    hideLoading();
+    return;
+  }
+  state.uid = user.uid;
+  state.familyId = localStorage.getItem('familyId');
+  state.memberName = localStorage.getItem('memberName');
+
+  if (!state.familyId || !state.memberName) {
+    // 認証だけ通って家族コード未設定（このパスは通常通らないが保険）
+    $('loginScreen').style.display = 'flex';
+    $('app').style.display = 'none';
+    hideLoading();
+    return;
+  }
+
+  // 家族ドキュメント作成（無ければ）
+  try {
+    const familyRef = doc(db, 'families', state.familyId);
+    const snap = await getDoc(familyRef);
+    if (!snap.exists()) {
+      await setDoc(familyRef, {
+        createdAt: serverTimestamp(),
+        members: [{ uid: state.uid, name: state.memberName }]
+      });
+    } else {
+      const members = snap.data().members || [];
+      if (!members.some(m => m.uid === state.uid)) {
+        members.push({ uid: state.uid, name: state.memberName });
+        await updateDoc(familyRef, { members });
+      }
+    }
+  } catch (e) {
+    console.warn('family doc init:', e);
+  }
+
+  $('loginScreen').style.display = 'none';
+  $('app').style.display = 'block';
+  $('topUserInfo').textContent = `${state.memberName} ・ ${state.familyId}`;
+  $('familyCodeDisplay').textContent = state.familyId;
+
+  hideLoading();
+
+  await loadProfile();
+  setCurrentWeek(getMondayOf(new Date()));
+  subscribeFavorites();
+  subscribeHistory();
+  checkApiKeyWarning();
+});
+
+$('logoutBtn').addEventListener('click', async () => {
+  if (!confirm('ログアウトしますか？')) return;
+  if (state.unsubMenu) state.unsubMenu();
+  if (state.unsubFavorites) state.unsubFavorites();
+  if (state.unsubHistory) state.unsubHistory();
+  localStorage.removeItem('familyId');
+  localStorage.removeItem('memberName');
+  await signOut(auth);
+  location.reload();
+});
+
+// ============================================================
+// タブ切替
+// ============================================================
+document.querySelectorAll('.tabbar button').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+function switchTab(name) {
+  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  $('page-' + name).classList.remove('hidden');
+  const titles = { menu:'🍽️ 今週の献立', generate:'✨ 献立を生成', shopping:'🛒 買い物リスト', favorites:'⭐ お気に入り', settings:'⚙️ 設定' };
+  $('topTitle').textContent = titles[name] || '献立';
+  if (name === 'shopping') renderShopping();
+  if (name === 'generate') checkApiKeyWarning();
+}
+
+$('openGenerateBtn').addEventListener('click', () => switchTab('generate'));
+$('goToSettingsFromWarn').addEventListener('click', (e) => { e.preventDefault(); switchTab('settings'); });
+
+// ============================================================
+// プロフィール
+// ============================================================
+async function loadProfile() {
+  const ref = doc(db, 'families', state.familyId, 'profile', 'main');
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    state.profile = Object.assign({ members: [], exclude: '', notes: '' }, snap.data());
+  }
+  renderProfile();
+}
+
+function renderProfile() {
+  const list = $('membersList');
+  list.innerHTML = '';
+  if (!state.profile.members || state.profile.members.length === 0) {
+    state.profile.members = [
+      { name: '父', age: '30代', role: '大人' },
+      { name: '母', age: '30代', role: '大人' },
+      { name: '息子', age: '6歳', role: '子供' },
+      { name: '娘', age: '3歳', role: '子供' }
+    ];
+  }
+  state.profile.members.forEach((m, i) => addMemberRow(m, i));
+  $('profileExclude').value = state.profile.exclude || '';
+  $('profileNotes').value = state.profile.notes || '';
+}
+
+function addMemberRow(m = { name:'', age:'', role:'大人' }, idx = null) {
+  const list = $('membersList');
+  const row = document.createElement('div');
+  row.className = 'member-row';
+  row.innerHTML = `
+    <input type="text" placeholder="名前" value="${escapeHtml(m.name||'')}" />
+    <input type="text" placeholder="年齢" value="${escapeHtml(m.age||'')}" />
+    <select>
+      <option value="大人" ${m.role==='大人'?'selected':''}>大人</option>
+      <option value="子供" ${m.role==='子供'?'selected':''}>子供</option>
+      <option value="高齢" ${m.role==='高齢'?'selected':''}>高齢</option>
+    </select>
+    <button type="button" title="削除">✕</button>
+  `;
+  row.querySelector('button').addEventListener('click', () => row.remove());
+  list.appendChild(row);
+}
+
+$('addMemberBtn').addEventListener('click', () => addMemberRow());
+
+$('saveProfileBtn').addEventListener('click', async () => {
+  const rows = $('membersList').querySelectorAll('.member-row');
+  const members = [];
+  rows.forEach(r => {
+    const inputs = r.querySelectorAll('input');
+    const sel = r.querySelector('select');
+    const name = inputs[0].value.trim();
+    if (!name) return;
+    members.push({ name, age: inputs[1].value.trim(), role: sel.value });
+  });
+  state.profile = {
+    members,
+    exclude: $('profileExclude').value.trim(),
+    notes: $('profileNotes').value.trim()
+  };
+  try {
+    await setDoc(doc(db, 'families', state.familyId, 'profile', 'main'), state.profile);
+    showToast('プロフィールを保存しました');
+  } catch (e) {
+    showToast('保存失敗: ' + e.message, true);
+  }
+});
+
+// ============================================================
+// API キー（端末ローカル保存）
+// ============================================================
+function loadApiKey() { return localStorage.getItem('geminiApiKey') || ''; }
+function loadModel() { return localStorage.getItem('geminiModel') || 'gemini-2.5-flash'; }
+
+$('saveApiKeyBtn').addEventListener('click', () => {
+  const key = $('apiKeyInput').value.trim();
+  const model = $('modelSelect').value;
+  if (!key) { showToast('APIキーを入力してください', true); return; }
+  localStorage.setItem('geminiApiKey', key);
+  localStorage.setItem('geminiModel', model);
+  showToast('APIキーを保存しました');
+  checkApiKeyWarning();
+});
+
+function checkApiKeyWarning() {
+  const has = !!loadApiKey();
+  $('apiKeyWarning').classList.toggle('hidden', has);
+  if (has) {
+    $('apiKeyInput').value = loadApiKey();
+    $('modelSelect').value = loadModel();
+  }
+}
+
+$('copyFamilyCodeBtn').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(state.familyId);
+    showToast('コピーしました');
+  } catch (e) {
+    showToast('コピー失敗', true);
+  }
+});
+
+// ============================================================
+// 週ナビ + 献立リアルタイム購読
+// ============================================================
+function setCurrentWeek(monday) {
+  state.currentWeekStart = fmtDate(monday);
+  const sun = addDays(monday, 6);
+  $('weekTitle').textContent = `${fmtMD(fmtDate(monday))}（月）〜 ${fmtMD(fmtDate(sun))}（日）`;
+  $('shoppingWeekTitle').textContent = $('weekTitle').textContent;
+  const today = todayStr();
+  $('thisWeekBtn').disabled = (state.currentWeekStart === fmtDate(getMondayOf(new Date())));
+  subscribeMenu(state.currentWeekStart);
+}
+
+$('prevWeekBtn').addEventListener('click', () => {
+  const d = new Date(state.currentWeekStart);
+  setCurrentWeek(addDays(d, -7));
+});
+$('nextWeekBtn').addEventListener('click', () => {
+  const d = new Date(state.currentWeekStart);
+  setCurrentWeek(addDays(d, 7));
+});
+$('thisWeekBtn').addEventListener('click', () => {
+  setCurrentWeek(getMondayOf(new Date()));
+});
+
+function subscribeMenu(weekStart) {
+  if (state.unsubMenu) state.unsubMenu();
+  const ref = doc(db, 'families', state.familyId, 'menus', weekStart);
+  state.unsubMenu = onSnapshot(ref, (snap) => {
+    state.currentMenu = snap.exists() ? Object.assign({ id: weekStart }, snap.data()) : null;
+    renderMenu();
+    renderShopping();
+  }, (err) => console.error('menu sub:', err));
+}
+
+// ============================================================
+// 献立レンダリング
+// ============================================================
+function renderMenu() {
+  const c = $('menuContainer');
+  c.innerHTML = '';
+  if (!state.currentMenu || !state.currentMenu.days || state.currentMenu.days.length === 0) {
+    $('menuEmpty').classList.remove('hidden');
+    return;
+  }
+  $('menuEmpty').classList.add('hidden');
+
+  const today = todayStr();
+  state.currentMenu.days.forEach((day, idx) => {
+    const card = document.createElement('div');
+    card.className = 'day-card' + (day.date === today ? ' today' : '');
+    let inner = `
+      <div class="day-head">
+        <div>
+          <span class="day-name">${escapeHtml(day.dayName || WEEKDAYS_LONG[idx])}</span>
+          <span class="day-date"> ${day.date ? fmtMD(day.date) : ''}</span>
+        </div>
+      </div>
+    `;
+    ['breakfast','lunch','dinner'].forEach(meal => {
+      const block = day[meal];
+      if (!block) return;
+      const label = { breakfast:'朝食', lunch:'昼食', dinner:'夕食' }[meal];
+      inner += `<div class="meal-block"><div class="meal-label">${label}</div>`;
+      if (block.main) inner += renderDish(block.main, 'main', day.date, meal, 'main');
+      (block.sides || []).forEach((s, si) => {
+        inner += renderDish(s, 'side', day.date, meal, 'side-' + si);
+      });
+      inner += `</div>`;
+    });
+    inner += `<div class="day-actions">
+      <button class="btn small ghost" data-action="regen-day" data-date="${day.date}">この日だけ再生成</button>
+    </div>`;
+    card.innerHTML = inner;
+    c.appendChild(card);
+  });
+
+  // イベント
+  c.querySelectorAll('[data-action="show-recipe"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { date, meal, slot } = btn.dataset;
+      openRecipeModal(date, meal, slot);
+    });
+  });
+  c.querySelectorAll('[data-action="fav"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { date, meal, slot } = btn.dataset;
+      toggleFavorite(date, meal, slot);
+    });
+  });
+  c.querySelectorAll('[data-action="regen-day"]').forEach(btn => {
+    btn.addEventListener('click', () => regenerateDay(btn.dataset.date));
+  });
+}
+
+function renderDish(dish, type, date, meal, slot) {
+  const isFav = state.favorites.some(f => f.name === dish.name);
+  return `
+    <div class="dish ${type}">
+      <div class="dish-name">${escapeHtml(dish.name || '')}</div>
+      <div class="dish-actions">
+        <button data-action="show-recipe" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="レシピを見る">📖</button>
+        <button class="fav ${isFav?'active':''}" data-action="fav" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="お気に入り">${isFav?'★':'☆'}</button>
+      </div>
+    </div>
+  `;
+}
+
+function getDishFromMenu(date, meal, slot) {
+  if (!state.currentMenu) return null;
+  const day = state.currentMenu.days.find(d => d.date === date);
+  if (!day || !day[meal]) return null;
+  if (slot === 'main') return day[meal].main;
+  if (slot.startsWith('side-')) {
+    const idx = parseInt(slot.split('-')[1]);
+    return (day[meal].sides || [])[idx];
+  }
+  return null;
+}
+
+// ============================================================
+// レシピモーダル
+// ============================================================
+function openRecipeModal(date, meal, slot) {
+  const dish = getDishFromMenu(date, meal, slot);
+  if (!dish) return;
+  $('recipeModalTitle').textContent = dish.name;
+  let body = '';
+  if (dish.servings || dish.time) {
+    body += `<div class="recipe-meta">`;
+    if (dish.servings) body += `<span>👥 ${escapeHtml(dish.servings)}</span>`;
+    if (dish.time) body += `<span>⏱ ${escapeHtml(dish.time)}</span>`;
+    body += `</div>`;
+  }
+  if (dish.ingredients && dish.ingredients.length) {
+    body += `<div class="recipe-section"><h3>材料</h3><ul>`;
+    dish.ingredients.forEach(i => body += `<li>${escapeHtml(i.name||'')} <span style="color:#94A3B8;">${escapeHtml(i.amount||'')}</span></li>`);
+    body += `</ul></div>`;
+  }
+  if (dish.steps && dish.steps.length) {
+    body += `<div class="recipe-section"><h3>作り方</h3><ol>`;
+    dish.steps.forEach(s => body += `<li>${escapeHtml(s)}</li>`);
+    body += `</ol></div>`;
+  }
+  $('recipeModalBody').innerHTML = body;
+  $('recipeModal').classList.add('show');
+}
+$('recipeModalClose').addEventListener('click', () => $('recipeModal').classList.remove('show'));
+$('recipeModal').addEventListener('click', (e) => { if (e.target.id === 'recipeModal') $('recipeModal').classList.remove('show'); });
+
+// ============================================================
+// お気に入り
+// ============================================================
+function subscribeFavorites() {
+  if (state.unsubFavorites) state.unsubFavorites();
+  const q = query(collection(db, 'families', state.familyId, 'favorites'), orderBy('addedAt','desc'));
+  state.unsubFavorites = onSnapshot(q, (snap) => {
+    state.favorites = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    renderFavorites();
+    renderMenu(); // ★マークを更新
+  });
+}
+
+function renderFavorites() {
+  const c = $('favoritesContainer');
+  c.innerHTML = '';
+  if (state.favorites.length === 0) {
+    $('favoritesEmpty').classList.remove('hidden');
+    return;
+  }
+  $('favoritesEmpty').classList.add('hidden');
+  state.favorites.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    div.innerHTML = `
+      <div class="info">
+        <div class="title">${escapeHtml(f.name)}</div>
+        <div class="meta">${escapeHtml((f.tags||[]).join(' / '))}</div>
+      </div>
+      <div class="actions">
+        <button class="btn small ghost" data-action="view">レシピ</button>
+        <button class="btn small danger" data-action="remove">削除</button>
+      </div>
+    `;
+    div.querySelector('[data-action="view"]').addEventListener('click', () => {
+      $('recipeModalTitle').textContent = f.name;
+      let body = '';
+      if (f.ingredients && f.ingredients.length) {
+        body += `<div class="recipe-section"><h3>材料</h3><ul>`;
+        f.ingredients.forEach(i => body += `<li>${escapeHtml(i.name||'')} <span style="color:#94A3B8;">${escapeHtml(i.amount||'')}</span></li>`);
+        body += `</ul></div>`;
+      }
+      if (f.steps && f.steps.length) {
+        body += `<div class="recipe-section"><h3>作り方</h3><ol>`;
+        f.steps.forEach(s => body += `<li>${escapeHtml(s)}</li>`);
+        body += `</ol></div>`;
+      }
+      $('recipeModalBody').innerHTML = body;
+      $('recipeModal').classList.add('show');
+    });
+    div.querySelector('[data-action="remove"]').addEventListener('click', async () => {
+      if (!confirm(`「${f.name}」をお気に入りから削除しますか？`)) return;
+      await deleteDoc(doc(db, 'families', state.familyId, 'favorites', f.id));
+      showToast('削除しました');
+    });
+    c.appendChild(div);
+  });
+}
+
+async function toggleFavorite(date, meal, slot) {
+  const dish = getDishFromMenu(date, meal, slot);
+  if (!dish) return;
+  const existing = state.favorites.find(f => f.name === dish.name);
+  if (existing) {
+    await deleteDoc(doc(db, 'families', state.familyId, 'favorites', existing.id));
+    showToast('お気に入りから削除しました');
+  } else {
+    const id = dish.name.replace(/[^a-zA-Z0-9ぁ-んァ-ヶー一-龯]/g, '').slice(0, 50) + '-' + Date.now();
+    await setDoc(doc(db, 'families', state.familyId, 'favorites', id), {
+      name: dish.name,
+      ingredients: dish.ingredients || [],
+      steps: dish.steps || [],
+      servings: dish.servings || '',
+      time: dish.time || '',
+      tags: dish.tags || [],
+      addedAt: serverTimestamp(),
+      addedBy: state.memberName
+    });
+    showToast('お気に入りに追加しました ⭐');
+  }
+}
+
+// ============================================================
+// 履歴
+// ============================================================
+function subscribeHistory() {
+  if (state.unsubHistory) state.unsubHistory();
+  const q = query(collection(db, 'families', state.familyId, 'menus'), orderBy('weekStart','desc'), limit(20));
+  state.unsubHistory = onSnapshot(q, (snap) => {
+    state.history = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+    renderHistory();
+  });
+}
+
+function renderHistory() {
+  const c = $('historyContainer');
+  const empty = $('historyEmpty');
+  c.innerHTML = '';
+  if (state.history.length === 0) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  state.history.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'list-item';
+    const start = h.weekStart;
+    const end = fmtDate(addDays(new Date(start), 6));
+    div.innerHTML = `
+      <div class="info">
+        <div class="title">${fmtJP(start)} 〜 ${fmtMD(end)}</div>
+        <div class="meta">${(h.days||[]).length}日分</div>
+      </div>
+      <div class="actions">
+        <button class="btn small ghost" data-action="open">開く</button>
+        <button class="btn small danger" data-action="del">削除</button>
+      </div>
+    `;
+    div.querySelector('[data-action="open"]').addEventListener('click', () => {
+      setCurrentWeek(new Date(start));
+      switchTab('menu');
+    });
+    div.querySelector('[data-action="del"]').addEventListener('click', async () => {
+      if (!confirm(`${fmtJP(start)} の週の献立を削除しますか？`)) return;
+      await deleteDoc(doc(db, 'families', state.familyId, 'menus', h.id));
+      showToast('削除しました');
+    });
+    c.appendChild(div);
+  });
+}
+
+// ============================================================
+// 買い物リスト
+// ============================================================
+function renderShopping() {
+  const c = $('shoppingContainer');
+  c.innerHTML = '';
+  if (!state.currentMenu || !state.currentMenu.shoppingList) {
+    $('shoppingEmpty').classList.remove('hidden');
+    return;
+  }
+  $('shoppingEmpty').classList.add('hidden');
+  const list = state.currentMenu.shoppingList;
+  const checked = state.currentMenu.shoppingChecked || {};
+  const sections = [
+    ['meat_fish', '🐟 肉・魚'],
+    ['vegetables', '🥬 野菜'],
+    ['seasonings', '🧂 調味料'],
+    ['other', '🛒 その他']
+  ];
+  sections.forEach(([key, label]) => {
+    const items = list[key] || [];
+    if (items.length === 0) return;
+    const sec = document.createElement('div');
+    sec.className = 'shopping-section';
+    sec.innerHTML = `<h3>${label}</h3>`;
+    items.forEach((it, idx) => {
+      const itemKey = `${key}-${idx}`;
+      const isChecked = !!checked[itemKey];
+      const row = document.createElement('label');
+      row.className = 'shopping-item' + (isChecked ? ' checked' : '');
+      row.innerHTML = `
+        <input type="checkbox" ${isChecked?'checked':''} />
+        <div class="item-text">
+          <div class="item-name">${escapeHtml(it.name||'')}</div>
+          <div class="item-amount">${escapeHtml(it.amount||'')}</div>
+        </div>
+      `;
+      row.querySelector('input').addEventListener('change', async (e) => {
+        const newChecked = Object.assign({}, state.currentMenu.shoppingChecked || {});
+        if (e.target.checked) newChecked[itemKey] = true;
+        else delete newChecked[itemKey];
+        await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), { shoppingChecked: newChecked });
+      });
+      sec.appendChild(row);
+    });
+    c.appendChild(sec);
+  });
+}
+
+$('clearCheckedBtn').addEventListener('click', async () => {
+  if (!state.currentMenu) return;
+  if (!confirm('チェックを全てクリアしますか？')) return;
+  await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), { shoppingChecked: {} });
+});
+
+// ============================================================
+// AI 生成
+// ============================================================
+$('generateBtn').addEventListener('click', () => generateMenu());
+
+async function generateMenu() {
+  const apiKey = loadApiKey();
+  if (!apiKey) { showToast('先に設定タブで API キーを登録してください', true); switchTab('settings'); return; }
+
+  const weekStartDate = $('genWeekSelect').value === 'next'
+    ? addDays(getMondayOf(new Date()), 7)
+    : getMondayOf(new Date());
+  const meals = [];
+  if ($('mealBreakfast').checked) meals.push('breakfast');
+  if ($('mealLunch').checked) meals.push('lunch');
+  if ($('mealDinner').checked) meals.push('dinner');
+  if (meals.length === 0) { showToast('1つ以上の食事を選んでください', true); return; }
+
+  const opts = {
+    weekStart: fmtDate(weekStartDate),
+    meals,
+    time: $('genTime').value,
+    excludeOnce: $('genExcludeOnce').value.trim(),
+    extra: $('genExtraRequest').value.trim()
+  };
+
+  try {
+    showLoading('献立を考えています...');
+    const result = await callGemini(opts, null);
+    await saveMenu(opts.weekStart, result);
+    hideLoading();
+    showToast('献立を生成しました ✨');
+    setCurrentWeek(new Date(opts.weekStart));
+    switchTab('menu');
+  } catch (e) {
+    hideLoading();
+    showToast('生成失敗: ' + e.message, true);
+    console.error(e);
+  }
+}
+
+async function regenerateDay(date) {
+  const apiKey = loadApiKey();
+  if (!apiKey) { showToast('API キーが必要です', true); switchTab('settings'); return; }
+  if (!confirm(`${fmtJP(date)} の献立を作り直しますか？`)) return;
+  const meals = [];
+  ['breakfast','lunch','dinner'].forEach(m => {
+    if (state.currentMenu.days.find(d => d.date === date)?.[m]) meals.push(m);
+  });
+  try {
+    showLoading('この日の献立を考えています...');
+    const result = await callGemini({
+      weekStart: state.currentMenu.weekStart,
+      meals,
+      time: '',
+      excludeOnce: '',
+      extra: ''
+    }, date);
+    // 該当日のみ差し替え
+    const newDays = state.currentMenu.days.map(d => d.date === date ? result.days[0] : d);
+    // 買い物リストは再計算（簡易: 全日から集計し直す）
+    const newShoppingList = aggregateShoppingList(newDays);
+    await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), {
+      days: newDays,
+      shoppingList: newShoppingList
+    });
+    hideLoading();
+    showToast('再生成しました');
+  } catch (e) {
+    hideLoading();
+    showToast('再生成失敗: ' + e.message, true);
+  }
+}
+
+function aggregateShoppingList(days) {
+  const buckets = { meat_fish: [], vegetables: [], seasonings: [], other: [] };
+  const seen = new Set();
+  days.forEach(d => {
+    ['breakfast','lunch','dinner'].forEach(m => {
+      const block = d[m];
+      if (!block) return;
+      const dishes = [block.main, ...(block.sides||[])].filter(Boolean);
+      dishes.forEach(dish => {
+        (dish.ingredients||[]).forEach(ing => {
+          const cat = ing.category || 'other';
+          const bucket = buckets[cat] || buckets.other;
+          const key = (ing.name||'').toLowerCase();
+          if (seen.has(key)) return;
+          seen.add(key);
+          bucket.push({ name: ing.name, amount: ing.amount });
+        });
+      });
+    });
+  });
+  return buckets;
+}
+
+async function saveMenu(weekStart, result) {
+  const payload = {
+    weekStart,
+    days: result.days,
+    shoppingList: result.shoppingList || aggregateShoppingList(result.days),
+    shoppingChecked: {},
+    createdAt: serverTimestamp(),
+    createdBy: state.memberName
+  };
+  await setDoc(doc(db, 'families', state.familyId, 'menus', weekStart), payload);
+}
+
+// ============================================================
+// Gemini API 呼び出し（JSON schema で構造化出力）
+// ============================================================
+async function callGemini(opts, singleDate) {
+  const apiKey = loadApiKey();
+  const model = loadModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const prompt = buildPrompt(opts, singleDate);
+  const schema = buildSchema(opts.meals, singleDate);
+
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+      temperature: 0.9
+    }
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`Gemini API: ${res.status} ${txt.slice(0,200)}`);
+  }
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Gemini からの応答が空でした');
+  return JSON.parse(text);
+}
+
+function buildPrompt(opts, singleDate) {
+  const members = state.profile.members.map(m => `${m.name}（${m.age} / ${m.role}）`).join('、');
+  const allExclude = [state.profile.exclude, opts.excludeOnce].filter(Boolean).join('、');
+  const favTags = state.favorites.slice(0, 20).map(f => f.name).join('、');
+
+  const mealLabels = opts.meals.map(m => ({breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[m])).join('・');
+
+  let datesPart;
+  if (singleDate) {
+    datesPart = `${fmtJP(singleDate)}（${WEEKDAYS_LONG[(new Date(singleDate).getDay()+6)%7]}）の1日分のみ作成してください。`;
+  } else {
+    const start = new Date(opts.weekStart);
+    const dates = Array.from({length:7}, (_,i) => {
+      const d = addDays(start, i);
+      return `${WEEKDAYS_LONG[i]}（${fmtMD(fmtDate(d))}）`;
+    }).join('、');
+    datesPart = `${dates} の月〜日 7日分を作成してください。各日の date は YYYY-MM-DD 形式（月曜=${opts.weekStart}）。`;
+  }
+
+  return `あなたは家庭の献立アドバイザーです。以下の条件で献立を作成してください。
+
+【家族構成】${members}
+【含める食事】${mealLabels}
+${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
+${opts.time ? `【調理時間】${opts.time}` : ''}
+${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
+${opts.extra ? `【追加リクエスト】${opts.extra}` : ''}
+${favTags ? `【家族のお気に入り料理（候補として優先的に検討）】${favTags}` : ''}
+
+${datesPart}
+
+【ルール】
+- 各食事は main（主菜）1品 + sides（副菜）1〜2品
+- 子供がいる場合は辛さ控えめ、年齢に応じた配慮
+- 栄養バランス（肉・魚・野菜）を週でバランスよく
+- 同じ食材を複数日で使い回せるよう工夫
+- 各料理に詳細な材料（4人分換算、目安量）と作り方を含める
+- 材料の category は次のいずれか: "meat_fish"（肉・魚介）、"vegetables"（野菜・果物）、"seasonings"（調味料）、"other"（その他）
+- ${singleDate ? '' : 'shoppingList は週全体の買い物リスト（同食材は集約）'}
+
+JSON スキーマに厳密に従って出力してください。`;
+}
+
+function buildSchema(meals, singleDate) {
+  const dishSchema = {
+    type: 'object',
+    properties: {
+      name: { type: 'string' },
+      servings: { type: 'string' },
+      time: { type: 'string' },
+      ingredients: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            amount: { type: 'string' },
+            category: { type: 'string', enum: ['meat_fish','vegetables','seasonings','other'] }
+          },
+          required: ['name','amount','category']
+        }
+      },
+      steps: { type: 'array', items: { type: 'string' } }
+    },
+    required: ['name','ingredients','steps']
+  };
+  const mealBlock = {
+    type: 'object',
+    properties: {
+      main: dishSchema,
+      sides: { type: 'array', items: dishSchema }
+    },
+    required: ['main','sides']
+  };
+  const dayProps = { date: { type:'string' }, dayName: { type:'string' } };
+  const dayRequired = ['date','dayName'];
+  meals.forEach(m => { dayProps[m] = mealBlock; dayRequired.push(m); });
+  const daySchema = { type:'object', properties: dayProps, required: dayRequired };
+
+  const root = {
+    type: 'object',
+    properties: {
+      days: { type: 'array', items: daySchema }
+    },
+    required: ['days']
+  };
+
+  if (!singleDate) {
+    root.properties.shoppingList = {
+      type: 'object',
+      properties: {
+        meat_fish: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }},
+        vegetables: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }},
+        seasonings: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }},
+        other: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }}
+      }
+    };
+  }
+  return root;
+}
+
+// ============================================================
+// ユーティリティ
+// ============================================================
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================
+// Service Worker
+// ============================================================
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(e => console.warn('SW reg failed:', e));
+  });
+}
+</script>
+</body>
+</html>
