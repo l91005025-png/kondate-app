@@ -477,7 +477,8 @@ function showToast(msg, isError=false) {
   const t = $('toast');
   t.textContent = msg;
   t.className = 'toast show' + (isError ? ' error' : '');
-  setTimeout(() => t.className = 'toast', 2500);
+  setTimeout(() => t.className = 'toast', isError ? 8000 : 2500);
+  if (isError) console.error('[Toast]', msg);
 }
 
 function showLoading(msg) { $('loadingMsg').textContent = msg; $('loadingOverlay').classList.add('show'); }
@@ -1155,23 +1156,38 @@ async function callGemini(opts, singleDate) {
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: schema,
-      temperature: 0.9
+      temperature: 0.9,
+      maxOutputTokens: 32768
     }
   };
 
+  console.log('[Gemini] Request:', { model, url: url.replace(apiKey, '***'), body });
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
+  const respText = await res.text();
+  console.log('[Gemini] Response status:', res.status, 'body:', respText.slice(0, 2000));
   if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`Gemini API: ${res.status} ${txt.slice(0,200)}`);
+    let msg = respText;
+    try { msg = JSON.parse(respText).error?.message || respText; } catch {}
+    throw new Error(`HTTP ${res.status}: ${msg}`);
   }
-  const data = await res.json();
+  let data;
+  try { data = JSON.parse(respText); } catch (e) { throw new Error('JSON パース失敗: ' + respText.slice(0,200)); }
+
+  const finishReason = data.candidates?.[0]?.finishReason;
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Gemini からの応答が空でした');
-  return JSON.parse(text);
+  if (!text) {
+    const promptFeedback = data.promptFeedback ? JSON.stringify(data.promptFeedback) : '';
+    throw new Error(`応答が空（finishReason=${finishReason}）${promptFeedback}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('JSON 解析失敗: ' + text.slice(0,200));
+  }
 }
 
 function buildPrompt(opts, singleDate) {
@@ -1218,57 +1234,59 @@ JSON スキーマに厳密に従って出力してください。`;
 }
 
 function buildSchema(meals, singleDate) {
+  const STR = { type: 'STRING' };
   const dishSchema = {
-    type: 'object',
+    type: 'OBJECT',
     properties: {
-      name: { type: 'string' },
-      servings: { type: 'string' },
-      time: { type: 'string' },
+      name: STR,
+      servings: STR,
+      time: STR,
       ingredients: {
-        type: 'array',
+        type: 'ARRAY',
         items: {
-          type: 'object',
+          type: 'OBJECT',
           properties: {
-            name: { type: 'string' },
-            amount: { type: 'string' },
-            category: { type: 'string', enum: ['meat_fish','vegetables','seasonings','other'] }
+            name: STR,
+            amount: STR,
+            category: { type: 'STRING', enum: ['meat_fish','vegetables','seasonings','other'] }
           },
           required: ['name','amount','category']
         }
       },
-      steps: { type: 'array', items: { type: 'string' } }
+      steps: { type: 'ARRAY', items: STR }
     },
     required: ['name','ingredients','steps']
   };
   const mealBlock = {
-    type: 'object',
+    type: 'OBJECT',
     properties: {
       main: dishSchema,
-      sides: { type: 'array', items: dishSchema }
+      sides: { type: 'ARRAY', items: dishSchema }
     },
     required: ['main','sides']
   };
-  const dayProps = { date: { type:'string' }, dayName: { type:'string' } };
+  const dayProps = { date: STR, dayName: STR };
   const dayRequired = ['date','dayName'];
   meals.forEach(m => { dayProps[m] = mealBlock; dayRequired.push(m); });
-  const daySchema = { type:'object', properties: dayProps, required: dayRequired };
+  const daySchema = { type:'OBJECT', properties: dayProps, required: dayRequired };
 
+  const shoppingItem = { type:'OBJECT', properties:{ name: STR, amount: STR }, required:['name','amount'] };
   const root = {
-    type: 'object',
+    type: 'OBJECT',
     properties: {
-      days: { type: 'array', items: daySchema }
+      days: { type: 'ARRAY', items: daySchema }
     },
     required: ['days']
   };
 
   if (!singleDate) {
     root.properties.shoppingList = {
-      type: 'object',
+      type: 'OBJECT',
       properties: {
-        meat_fish: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }},
-        vegetables: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }},
-        seasonings: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }},
-        other: { type:'array', items: { type:'object', properties:{ name:{type:'string'}, amount:{type:'string'} }, required:['name','amount'] }}
+        meat_fish: { type:'ARRAY', items: shoppingItem },
+        vegetables: { type:'ARRAY', items: shoppingItem },
+        seasonings: { type:'ARRAY', items: shoppingItem },
+        other: { type:'ARRAY', items: shoppingItem }
       }
     };
   }

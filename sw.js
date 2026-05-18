@@ -1,5 +1,5 @@
 // 週間献立アプリ用 Service Worker
-const CACHE = 'kondate-v2';
+const CACHE = 'kondate-v3';
 const APP_SHELL = [
   './',
   './index.html',
