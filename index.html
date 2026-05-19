@@ -177,6 +177,28 @@
 
     .api-warning { background: #FEF3C7; border: 1px solid #FCD34D; color: #92400E; padding: 12px; border-radius: 10px; margin-bottom: 12px; font-size: 13px; }
     .api-warning a { color: #B45309; font-weight: 700; }
+
+    /* ============ 生成モード切替 ============ */
+    .gen-mode-tabs { display:flex; background:#F1F5F9; border-radius:10px; padding:4px; margin-bottom:16px; gap:4px; }
+    .gen-mode-tabs button { flex:1; padding:10px; border:none; background:transparent; border-radius:8px; color:#64748B; font-weight:600; font-size:13px; }
+    .gen-mode-tabs button.active { background:#fff; color:#16A34A; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+
+    /* ============ 余り物提案カード ============ */
+    .proposal-card { background:#fff; border:2px solid #BBF7D0; border-radius:14px; padding:14px; margin-bottom:12px; }
+    .proposal-head { display:flex; gap:10px; align-items:flex-start; margin-bottom:10px; }
+    .proposal-num { background:#16A34A; color:#fff; width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0; font-size:14px; }
+    .proposal-title { font-weight:700; color:#14532D; font-size:15px; line-height:1.3; }
+    .proposal-style { display:inline-block; background:#F0FDF4; color:#16A34A; font-size:11px; padding:2px 8px; border-radius:6px; font-weight:600; margin-top:4px; }
+    .proposal-dish { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; background:#F0FDF4; border-radius:8px; margin-bottom:6px; }
+    .proposal-dish .pd-name { flex:1; font-size:14px; }
+    .proposal-dish .badge { background:#16A34A; color:#fff; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600; margin-left:6px; }
+    .proposal-dish .badge.side { background:#94A3B8; }
+    .proposal-dish .pd-actions { display:flex; gap:4px; flex-shrink:0; }
+    .proposal-dish .pd-actions button { border:none; background:transparent; padding:4px 8px; border-radius:6px; font-size:16px; color:#64748B; }
+    .proposal-dish .pd-actions button:hover { background:#DCFCE7; }
+    .proposal-dish .pd-actions button.active { color:#F59E0B; }
+    .proposal-added { font-size:12px; color:#92400E; background:#FEF3C7; padding:8px 10px; border-radius:8px; margin-top:8px; }
+    .proposal-added strong { color:#78350F; }
   </style>
 </head>
 <body>
@@ -242,8 +264,15 @@
         ⚠️ Gemini API キーが未設定です。<a href="#" id="goToSettingsFromWarn">設定タブ</a>で登録してください（無料で取得できます）
       </div>
 
+      <div class="gen-mode-tabs">
+        <button class="gen-mode-btn active" data-mode="week">📅 週間献立</button>
+        <button class="gen-mode-btn" data-mode="fridge">🥬 冷蔵庫から</button>
+      </div>
+
+      <!-- ▼ 週間献立モード ▼ -->
+      <div id="genModeWeek">
       <div class="card">
-        <h2>🍽️ 献立を生成</h2>
+        <h2>🍽️ 週間献立を生成</h2>
         <p class="sub-title">家族構成・除外食材は設定タブのプロフィールが自動で使われます</p>
 
         <div class="form-group">
@@ -288,6 +317,38 @@
         <button class="btn" id="generateBtn">✨ 献立を生成する</button>
         <p class="hint mt-8 text-center" style="color:#94A3B8; font-size:11px;">お気に入りに登録した料理が候補として優先されます</p>
       </div>
+      </div><!-- /genModeWeek -->
+
+      <!-- ▼ 冷蔵庫モード ▼ -->
+      <div id="genModeFridge" class="hidden">
+      <div class="card">
+        <h2>🥬 冷蔵庫の余り物から</h2>
+        <p class="sub-title">手持ち食材を入れると、それを使った1食分の献立を3案提案します。常備の調味料・主食(ご飯・パン・麺・卵・油・塩・醤油・味噌など)は家にある前提で考えます。</p>
+
+        <div class="form-group">
+          <label>使いたい食材</label>
+          <textarea id="fridgeIngredients" placeholder="例:&#10;鶏むね肉 200g&#10;キャベツ 半分&#10;卵 2個&#10;トマト 1個&#10;玉ねぎ 1個"></textarea>
+          <span class="hint">改行 or 「、」区切り。量も書くとより具体的になります</span>
+        </div>
+
+        <div class="form-group">
+          <label>食事タイプ</label>
+          <div style="display:flex; gap:14px; flex-wrap:wrap;">
+            <label style="display:flex; gap:6px; align-items:center;"><input type="radio" name="fridgeMeal" value="dinner" checked /> 夕食</label>
+            <label style="display:flex; gap:6px; align-items:center;"><input type="radio" name="fridgeMeal" value="lunch" /> 昼食</label>
+            <label style="display:flex; gap:6px; align-items:center;"><input type="radio" name="fridgeMeal" value="breakfast" /> 朝食</label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>追加リクエスト（任意）</label>
+          <input type="text" id="fridgeExtra" placeholder="例: 和食で、30分以内" />
+        </div>
+
+        <button class="btn" id="generateFridgeBtn">✨ 3案を提案してもらう</button>
+        <p class="hint mt-8 text-center" style="color:#94A3B8; font-size:11px;">必要なら1〜2品の追加買い物も提案されます</p>
+      </div>
+      </div><!-- /genModeFridge -->
     </section>
 
     <!-- ===== 買い物タブ ===== -->
@@ -396,6 +457,17 @@
       <button class="modal-close" id="recipeModalClose">×</button>
     </div>
     <div id="recipeModalBody"></div>
+  </div>
+</div>
+
+<!-- ===== 余り物提案モーダル ===== -->
+<div class="modal-overlay" id="proposalsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>💡 提案 3案</h2>
+      <button class="modal-close" id="proposalsModalClose">×</button>
+    </div>
+    <div id="proposalsBody"></div>
   </div>
 </div>
 
@@ -592,6 +664,15 @@ function switchTab(name) {
 
 $('openGenerateBtn').addEventListener('click', () => switchTab('generate'));
 $('goToSettingsFromWarn').addEventListener('click', (e) => { e.preventDefault(); switchTab('settings'); });
+
+// 生成タブのモード切替
+document.querySelectorAll('.gen-mode-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.gen-mode-btn').forEach(x => x.classList.toggle('active', x === b));
+    $('genModeWeek').classList.toggle('hidden', b.dataset.mode !== 'week');
+    $('genModeFridge').classList.toggle('hidden', b.dataset.mode !== 'fridge');
+  });
+});
 
 // ============================================================
 // プロフィール
@@ -848,6 +929,49 @@ function openRecipeModal(date, meal, slot) {
 $('recipeModalClose').addEventListener('click', () => $('recipeModal').classList.remove('show'));
 $('recipeModal').addEventListener('click', (e) => { if (e.target.id === 'recipeModal') $('recipeModal').classList.remove('show'); });
 
+// 提案モーダルを閉じる
+$('proposalsModalClose').addEventListener('click', () => $('proposalsModal').classList.remove('show'));
+$('proposalsModal').addEventListener('click', (e) => { if (e.target.id === 'proposalsModal') $('proposalsModal').classList.remove('show'); });
+
+// 単一の dish オブジェクトからレシピモーダルを開く
+function openRecipeFromDish(dish) {
+  $('recipeModalTitle').textContent = dish.name || '';
+  let body = '';
+  if (dish.servings || dish.time) {
+    body += `<div class="recipe-meta">`;
+    if (dish.servings) body += `<span>👥 ${escapeHtml(dish.servings)}</span>`;
+    if (dish.time) body += `<span>⏱ ${escapeHtml(dish.time)}</span>`;
+    body += `</div>`;
+  }
+  if (dish.ingredients && dish.ingredients.length) {
+    body += `<div class="recipe-section"><h3>材料</h3><ul>`;
+    dish.ingredients.forEach(i => body += `<li>${escapeHtml(i.name||'')} <span style="color:#94A3B8;">${escapeHtml(i.amount||'')}</span></li>`);
+    body += `</ul></div>`;
+  }
+  if (dish.steps && dish.steps.length) {
+    body += `<div class="recipe-section"><h3>作り方</h3><ol>`;
+    dish.steps.forEach(s => body += `<li>${escapeHtml(s)}</li>`);
+    body += `</ol></div>`;
+  }
+  $('recipeModalBody').innerHTML = body;
+  $('recipeModal').classList.add('show');
+}
+
+// 任意の dish オブジェクトをお気に入りに保存
+async function saveDishAsFavorite(dish) {
+  const id = (dish.name || 'dish').replace(/[^a-zA-Z0-9ぁ-んァ-ヶー一-龯]/g, '').slice(0, 50) + '-' + Date.now();
+  await setDoc(doc(db, 'families', state.familyId, 'favorites', id), {
+    name: dish.name || '',
+    ingredients: dish.ingredients || [],
+    steps: dish.steps || [],
+    servings: dish.servings || '',
+    time: dish.time || '',
+    tags: dish.tags || [],
+    addedAt: serverTimestamp(),
+    addedBy: state.memberName
+  });
+}
+
 // ============================================================
 // お気に入り
 // ============================================================
@@ -1035,6 +1159,196 @@ $('clearCheckedBtn').addEventListener('click', async () => {
 // AI 生成
 // ============================================================
 $('generateBtn').addEventListener('click', () => generateMenu());
+$('generateFridgeBtn').addEventListener('click', () => generateFromFridge());
+
+async function generateFromFridge() {
+  const apiKey = loadApiKey();
+  if (!apiKey) { showToast('先に設定タブで API キーを登録してください', true); switchTab('settings'); return; }
+  const ing = $('fridgeIngredients').value.trim();
+  if (!ing) { showToast('使いたい食材を入力してください', true); return; }
+  const meal = document.querySelector('input[name="fridgeMeal"]:checked')?.value || 'dinner';
+  const extra = $('fridgeExtra').value.trim();
+
+  try {
+    showLoading('提案を考えています...');
+    const result = await callGeminiProposals(ing, meal, extra);
+    hideLoading();
+    if (!result.proposals || result.proposals.length === 0) {
+      showToast('提案が得られませんでした', true);
+      return;
+    }
+    showProposals(result.proposals, ing);
+  } catch (e) {
+    hideLoading();
+    showToast('提案失敗: ' + e.message, true);
+    console.error(e);
+  }
+}
+
+function showProposals(proposals, sourceIngredients) {
+  const c = $('proposalsBody');
+  c.innerHTML = '';
+  const intro = document.createElement('p');
+  intro.className = 'sub-title';
+  intro.style.cssText = 'margin:0 0 12px; font-size:13px; color:#64748B;';
+  intro.textContent = '使った食材: ' + sourceIngredients.replace(/\n/g, '、').slice(0, 60) + (sourceIngredients.length > 60 ? '…' : '');
+  c.appendChild(intro);
+
+  proposals.forEach((p, idx) => {
+    const card = document.createElement('div');
+    card.className = 'proposal-card';
+    const dishes = [p.main, ...(p.sides||[])].filter(Boolean);
+    let dishesHtml = '';
+    dishes.forEach((d, di) => {
+      const badge = di === 0 ? '<span class="badge">主菜</span>' : '<span class="badge side">副菜</span>';
+      dishesHtml += `
+        <div class="proposal-dish">
+          <div class="pd-name">${escapeHtml(d.name||'')} ${badge}</div>
+          <div class="pd-actions">
+            <button data-act="recipe" data-i="${idx}" data-d="${di}" title="レシピ">📖</button>
+            <button data-act="fav" data-i="${idx}" data-d="${di}" title="お気に入り">☆</button>
+          </div>
+        </div>
+      `;
+    });
+    card.innerHTML = `
+      <div class="proposal-head">
+        <div class="proposal-num">${idx+1}</div>
+        <div>
+          <div class="proposal-title">${escapeHtml(p.title||'')}</div>
+          ${p.style ? `<div class="proposal-style">${escapeHtml(p.style)}</div>` : ''}
+        </div>
+      </div>
+      ${dishesHtml}
+      ${p.addedIngredients && p.addedIngredients.length ? `
+        <div class="proposal-added"><strong>追加買い物:</strong> ${p.addedIngredients.map(escapeHtml).join('、')}</div>
+      ` : ''}
+    `;
+    c.appendChild(card);
+  });
+
+  c.querySelectorAll('[data-act="recipe"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.dataset.i), di = parseInt(btn.dataset.d);
+      const p = proposals[i];
+      const dish = di === 0 ? p.main : (p.sides||[])[di-1];
+      if (dish) openRecipeFromDish(dish);
+    });
+  });
+  c.querySelectorAll('[data-act="fav"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const i = parseInt(btn.dataset.i), di = parseInt(btn.dataset.d);
+      const p = proposals[i];
+      const dish = di === 0 ? p.main : (p.sides||[])[di-1];
+      if (!dish) return;
+      try {
+        await saveDishAsFavorite(dish);
+        btn.textContent = '★';
+        btn.classList.add('active');
+        showToast(`「${dish.name}」をお気に入りに追加しました ⭐`);
+      } catch (e) {
+        showToast('保存失敗: ' + e.message, true);
+      }
+    });
+  });
+
+  $('proposalsModal').classList.add('show');
+}
+
+async function callGeminiProposals(ingredientsText, meal, extra) {
+  const apiKey = loadApiKey();
+  const model = loadModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const members = state.profile.members.map(m => `${m.name}（${m.age}/${m.role}）`).join('、');
+  const allExclude = state.profile.exclude || '';
+  const mealLabel = { breakfast:'朝食', lunch:'昼食', dinner:'夕食' }[meal];
+  const favTags = state.favorites.slice(0, 10).map(f => f.name).join('、');
+
+  const prompt = `あなたは家庭の献立アドバイザーです。家にある以下の食材を使った${mealLabel}を3案提案してください。
+
+【家族構成】${members}
+${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
+${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
+${extra ? `【追加リクエスト】${extra}` : ''}
+${favTags ? `【家族のお気に入り料理】${favTags}（テイスト参考）` : ''}
+
+【手持ちの食材】
+${ingredientsText}
+
+【ルール】
+- ご飯・パン・麺・卵・油・砂糖・塩・しょうゆ・味噌・みりん・酢・酒・コンソメ・だしの素・にんにく・しょうが・ねぎ・マヨネーズ・ケチャップ などの常備食材・調味料は家にある前提で自由に使ってOK
+- 各案は 主菜1品 + 副菜0〜2品 で構成（${mealLabel}として無理のない品数）
+- 手持ちの食材をできるだけ無駄なく使う
+- 3案はそれぞれ違うジャンル・調理法・味付け（和食・洋食・中華・エスニックなど）でバリエーションを出す
+- 各料理に詳細な材料(4人分換算、目安量)と作り方を含める
+- 必要なら1〜2品の追加買い物を許可。その場合は addedIngredients に明記
+- title は「料理ジャンル + 主菜名（+副菜）」の形式（例:「和風 鶏もも肉の照り焼き + 野菜サラダ」）
+- style は「和食」「洋食」「中華」「エスニック」などのジャンル名
+
+JSON スキーマに厳密に従って出力してください。`;
+
+  const STR = { type:'STRING' };
+  const dishSchema = {
+    type:'OBJECT',
+    properties: {
+      name: STR,
+      servings: STR,
+      time: STR,
+      ingredients: {
+        type:'ARRAY',
+        items: {
+          type:'OBJECT',
+          properties: { name: STR, amount: STR },
+          required: ['name','amount']
+        }
+      },
+      steps: { type:'ARRAY', items: STR }
+    },
+    required: ['name','ingredients','steps']
+  };
+  const proposalSchema = {
+    type:'OBJECT',
+    properties: {
+      title: STR,
+      style: STR,
+      main: dishSchema,
+      sides: { type:'ARRAY', items: dishSchema },
+      addedIngredients: { type:'ARRAY', items: STR }
+    },
+    required: ['title','style','main','sides']
+  };
+  const schema = {
+    type:'OBJECT',
+    properties: { proposals: { type:'ARRAY', items: proposalSchema } },
+    required: ['proposals']
+  };
+
+  const body = {
+    contents: [{ role:'user', parts:[{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+      temperature: 1.0,
+      maxOutputTokens: 24576
+    }
+  };
+
+  console.log('[Gemini fridge] Request body:', body);
+  const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const respText = await res.text();
+  console.log('[Gemini fridge] Status:', res.status, 'body:', respText.slice(0, 2000));
+  if (!res.ok) {
+    let msg = respText;
+    try { msg = JSON.parse(respText).error?.message || respText; } catch {}
+    throw new Error(`HTTP ${res.status}: ${msg}`);
+  }
+  const data = JSON.parse(respText);
+  const finishReason = data.candidates?.[0]?.finishReason;
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error(`応答が空（finishReason=${finishReason}）`);
+  return JSON.parse(text);
+}
 
 async function generateMenu() {
   const apiKey = loadApiKey();
