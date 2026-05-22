@@ -308,6 +308,16 @@
 
         <div class="grid-2">
           <div class="form-group">
+            <label>1食あたりの品数</label>
+            <select id="genSidesCount">
+              <option value="auto" selected>おまかせ（1〜2品）</option>
+              <option value="0">主菜のみ</option>
+              <option value="1">主菜＋副菜1品</option>
+              <option value="2">主菜＋副菜2品</option>
+              <option value="3">主菜＋副菜3品</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>調理時間の目安</label>
             <select id="genTime">
               <option value="">指定なし</option>
@@ -317,10 +327,11 @@
               <option value="1時間以内">1時間以内</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>今回だけ除外する食材</label>
-            <input type="text" id="genExcludeOnce" placeholder="例: 鶏肉" />
-          </div>
+        </div>
+
+        <div class="form-group">
+          <label>今回だけ除外する食材</label>
+          <input type="text" id="genExcludeOnce" placeholder="例: 鶏肉" />
         </div>
 
         <div class="form-group">
@@ -352,6 +363,16 @@
             <label style="display:flex; gap:6px; align-items:center;"><input type="radio" name="fridgeMeal" value="lunch" /> 昼食</label>
             <label style="display:flex; gap:6px; align-items:center;"><input type="radio" name="fridgeMeal" value="breakfast" /> 朝食</label>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label>1案あたりの品数</label>
+          <select id="fridgeSidesCount">
+            <option value="auto" selected>おまかせ（0〜2品）</option>
+            <option value="0">主菜のみ</option>
+            <option value="1">主菜＋副菜1品</option>
+            <option value="2">主菜＋副菜2品</option>
+          </select>
         </div>
 
         <div class="form-group">
@@ -1212,10 +1233,11 @@ async function generateFromFridge() {
   if (!ing) { showToast('使いたい食材を入力してください', true); return; }
   const meal = document.querySelector('input[name="fridgeMeal"]:checked')?.value || 'dinner';
   const extra = $('fridgeExtra').value.trim();
+  const sidesCount = $('fridgeSidesCount').value;
 
   try {
     showLoading('提案を考えています...');
-    const result = await callGeminiProposals(ing, meal, extra);
+    const result = await callGeminiProposals(ing, meal, extra, sidesCount);
     hideLoading();
     if (!result.proposals || result.proposals.length === 0) {
       showToast('提案が得られませんでした', true);
@@ -1299,7 +1321,7 @@ function showProposals(proposals, sourceIngredients) {
   $('proposalsModal').classList.add('show');
 }
 
-async function callGeminiProposals(ingredientsText, meal, extra) {
+async function callGeminiProposals(ingredientsText, meal, extra, sidesCount = 'auto') {
   const members = state.profile.members.map(m => `${m.name}（${m.age}/${m.role}）`).join('、');
   const allExclude = state.profile.exclude || '';
   const mealLabel = { breakfast:'朝食', lunch:'昼食', dinner:'夕食' }[meal];
@@ -1318,7 +1340,7 @@ ${ingredientsText}
 
 【ルール】
 - ご飯・パン・麺・卵・油・砂糖・塩・しょうゆ・味噌・みりん・酢・酒・コンソメ・だしの素・にんにく・しょうが・ねぎ・マヨネーズ・ケチャップ などの常備食材・調味料は家にある前提で自由に使ってOK
-- 各案は 主菜1品 + 副菜0〜2品 で構成（${mealLabel}として無理のない品数）
+- 各案は 主菜1品 + 副菜${sidesCount === 'auto' ? '0〜2品' : sidesCountLabel(sidesCount)} で構成（${mealLabel}として無理のない品数）
 - 手持ちの食材をできるだけ無駄なく使う
 - 3案はそれぞれ違うジャンル・調理法・味付け（和食・洋食・中華・エスニックなど）でバリエーションを出す
 - 各料理に詳細な材料(4人分換算、目安量)と作り方を含める
@@ -1391,6 +1413,7 @@ async function generateMenu() {
     weekStart: fmtDate(weekStartDate),
     meals,
     time: $('genTime').value,
+    sidesCount: $('genSidesCount').value,  // 'auto' | '0' | '1' | '2' | '3'
     excludeOnce: $('genExcludeOnce').value.trim(),
     extra: $('genExtraRequest').value.trim()
   };
@@ -1398,7 +1421,7 @@ async function generateMenu() {
   try {
     showLoading('献立を考えています...');
     const result = await callGemini(opts, null);
-    await saveMenu(opts.weekStart, result);
+    await saveMenu(opts.weekStart, result, opts);
     hideLoading();
     showToast('献立を生成しました ✨');
     setCurrentWeek(new Date(opts.weekStart));
@@ -1436,6 +1459,7 @@ async function regenerateDay(date) {
       weekStart: state.currentMenu.weekStart,
       meals,
       time: '',
+      sidesCount: state.currentMenu.sidesCount || 'auto',
       excludeOnce: '',
       extra: ''
     }, date, excludeDishes);
@@ -1582,12 +1606,13 @@ function listDishNames(menu, exclude = null) {
   return names.filter(Boolean);
 }
 
-async function saveMenu(weekStart, result) {
+async function saveMenu(weekStart, result, opts) {
   const payload = {
     weekStart,
     days: result.days,
     shoppingList: result.shoppingList || aggregateShoppingList(result.days),
     shoppingChecked: {},
+    sidesCount: opts?.sidesCount || 'auto',
     createdAt: serverTimestamp(),
     createdBy: state.memberName
   };
@@ -1673,6 +1698,14 @@ async function callGemini(opts, singleDate, excludeDishes = []) {
   return await geminiRequest(prompt, schema);
 }
 
+function sidesCountLabel(sc) {
+  if (sc === '0') return '0品（副菜なし、主菜のみ）';
+  if (sc === '1') return 'ちょうど1品';
+  if (sc === '2') return 'ちょうど2品';
+  if (sc === '3') return 'ちょうど3品';
+  return '1〜2品（料理に応じて）';
+}
+
 function buildPrompt(opts, singleDate, excludeDishes = []) {
   const members = state.profile.members.map(m => `${m.name}（${m.age} / ${m.role}）`).join('、');
   const allExclude = [state.profile.exclude, opts.excludeOnce].filter(Boolean).join('、');
@@ -1710,7 +1743,7 @@ ${excludeSection}
 ${datesPart}
 
 【ルール】
-- 各食事は main（主菜）1品 + sides（副菜）1〜2品
+- 各食事は main（主菜）1品 + sides（副菜）${sidesCountLabel(opts.sidesCount)}
 - 子供がいる場合は辛さ控えめ、年齢に応じた配慮
 - 栄養バランス（肉・魚・野菜）を週でバランスよく
 - 同じ食材を複数日で使い回せるよう工夫
