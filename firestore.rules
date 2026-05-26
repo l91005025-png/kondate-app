@@ -29,6 +29,12 @@ service cloud.firestore {
       match /favorites/{recipeId} {
         allow read, write: if isSignedIn();
       }
+
+      // secrets/{docId}: 家族で共有する秘匿情報（APIキー等）
+      //   家族コードを知っている家族メンバーのみアクセス可能
+      match /secrets/{docId} {
+        allow read, write: if isSignedIn();
+      }
     }
   }
 }

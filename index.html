@@ -490,6 +490,14 @@
           <span class="hint">家族用途なら Haiku で十分。コストは Anthropic Console で確認できます</span>
         </div>
 
+        <div class="form-group">
+          <label style="display:flex; gap:8px; align-items:center; cursor:pointer; font-weight:600;">
+            <input type="checkbox" id="shareApiKey" />
+            <span>👨‍👩‍👧‍👦 このAPIキーを家族で共有する</span>
+          </label>
+          <span class="hint">オンにすると Firestore に保存され、家族の他の端末でも自動で使えるようになります。請求は1つにまとまります。<br><strong style="color:#92400E;">⚠️ 家族コードを知る人なら誰でも使える状態になる</strong>ので、家族コードは推測しにくいものに</span>
+        </div>
+
         <button class="btn" id="saveApiKeyBtn">APIキーを保存</button>
       </div>
 
@@ -779,6 +787,7 @@ onAuthStateChanged(auth, async (user) => {
   setCurrentWeek(getMondayOf(new Date()));
   subscribeFavorites();
   subscribeHistory();
+  subscribeSharedApiKey();
   checkApiKeyWarning();
 });
 
@@ -787,6 +796,7 @@ $('logoutBtn').addEventListener('click', async () => {
   if (state.unsubMenu) state.unsubMenu();
   if (state.unsubFavorites) state.unsubFavorites();
   if (state.unsubHistory) state.unsubHistory();
+  if (state.unsubSharedKey) state.unsubSharedKey();
   localStorage.removeItem('familyId');
   localStorage.removeItem('memberName');
   await signOut(auth);
@@ -899,30 +909,54 @@ $('saveProfileBtn').addEventListener('click', async () => {
 function loadApiKey() { return localStorage.getItem('anthropicApiKey') || ''; }
 function loadModel() { return localStorage.getItem('claudeModel') || 'claude-haiku-4-5'; }
 
-$('saveApiKeyBtn').addEventListener('click', () => {
+$('saveApiKeyBtn').addEventListener('click', async () => {
   const key = $('apiKeyInput').value.trim();
   const model = $('modelSelect').value;
+  const share = $('shareApiKey').checked;
   if (!key) { showToast('APIキーを入力してください', true); return; }
   if (!key.startsWith('sk-ant-')) {
     if (!confirm('APIキーが「sk-ant-」で始まっていません。Anthropic Console のキーで間違いないですか？\n（このまま保存を続けますか？）')) return;
   }
   localStorage.setItem('anthropicApiKey', key);
   localStorage.setItem('claudeModel', model);
-  // 旧 Gemini キーがあれば削除
+  localStorage.setItem('shareApiKey', share ? '1' : '0');
   localStorage.removeItem('geminiApiKey');
   localStorage.removeItem('geminiModel');
-  showToast('APIキーを保存しました');
+
+  // 家族共有
+  if (share && state.familyId) {
+    try {
+      await setDoc(doc(db, 'families', state.familyId, 'secrets', 'api'), {
+        anthropicKey: key,
+        model,
+        sharedBy: state.memberName,
+        sharedAt: serverTimestamp()
+      });
+      showToast('APIキーを保存しました\n👨‍👩‍👧‍👦 家族の他端末にも自動反映されます');
+    } catch (e) {
+      showToast('家族共有の保存失敗: ' + e.message, true);
+      return;
+    }
+  } else if (!share && state.familyId) {
+    // 共有解除：Firestoreから削除
+    try {
+      await deleteDoc(doc(db, 'families', state.familyId, 'secrets', 'api'));
+    } catch (e) { /* 存在しなければエラー無視 */ }
+    showToast('APIキーを保存しました（この端末のみ）');
+  } else {
+    showToast('APIキーを保存しました');
+  }
   checkApiKeyWarning();
 });
 
 function checkApiKeyWarning() {
   const has = !!loadApiKey();
   $('apiKeyWarning').classList.toggle('hidden', has);
+  $('shareApiKey').checked = localStorage.getItem('shareApiKey') === '1';
   if (has) {
     $('apiKeyInput').value = loadApiKey();
     $('modelSelect').value = loadModel();
   } else if (localStorage.getItem('geminiApiKey')) {
-    // 旧 Gemini ユーザーへの案内（一度きり）
     if (!localStorage.getItem('migrationShown')) {
       localStorage.setItem('migrationShown', '1');
       setTimeout(() => {
@@ -930,6 +964,35 @@ function checkApiKeyWarning() {
       }, 800);
     }
   }
+}
+
+// 家族で共有された API キーを読み込む（起動時 + リアルタイム監視）
+function subscribeSharedApiKey() {
+  if (!state.familyId) return;
+  if (state.unsubSharedKey) state.unsubSharedKey();
+  const ref = doc(db, 'families', state.familyId, 'secrets', 'api');
+  state.unsubSharedKey = onSnapshot(ref, (snap) => {
+    if (!snap.exists()) return;
+    const data = snap.data();
+    if (!data.anthropicKey) return;
+    const hasLocal = !!localStorage.getItem('anthropicApiKey');
+    const shareMode = localStorage.getItem('shareApiKey') === '1';
+
+    if (!hasLocal) {
+      // ローカル未設定 → 自動取り込み（共有モードON）
+      localStorage.setItem('anthropicApiKey', data.anthropicKey);
+      if (data.model) localStorage.setItem('claudeModel', data.model);
+      localStorage.setItem('shareApiKey', '1');
+      checkApiKeyWarning();
+      showToast(`👨‍👩‍👧‍👦 家族(${data.sharedBy || '?'})が共有したAPIキーを取り込みました`);
+    } else if (shareMode && data.anthropicKey !== localStorage.getItem('anthropicApiKey')) {
+      // 共有モードかつ家族の誰かが更新 → 自動反映
+      localStorage.setItem('anthropicApiKey', data.anthropicKey);
+      if (data.model) localStorage.setItem('claudeModel', data.model);
+      checkApiKeyWarning();
+      showToast(`👨‍👩‍👧‍👦 家族(${data.sharedBy || '?'})がAPIキーを更新しました`);
+    }
+  }, (err) => console.warn('sharedKey sub:', err));
 }
 
 $('copyFamilyCodeBtn').addEventListener('click', async () => {
