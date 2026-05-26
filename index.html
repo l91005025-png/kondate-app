@@ -223,6 +223,16 @@
     .proposal-dish .pd-actions button.active { color:#F59E0B; }
     .proposal-added { font-size:12px; color:#92400E; background:#FEF3C7; padding:8px 10px; border-radius:8px; margin-top:8px; }
     .proposal-added strong { color:#78350F; }
+
+    /* ============ お気に入りピッカー ============ */
+    .fav-pick-item { display: flex; align-items: center; gap: 10px; padding: 12px; background: #F8FAFC; border-radius: 10px; margin-bottom: 6px; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
+    .fav-pick-item:hover { background: #F0FDF4; border-color: #BBF7D0; }
+    .fav-pick-item:active { transform: scale(0.98); }
+    .fav-pick-item .fp-info { flex: 1; min-width: 0; }
+    .fav-pick-item .fp-name { font-weight: 600; color: #14532D; font-size: 14px; }
+    .fav-pick-item .fp-meta { font-size: 11px; color: #64748B; margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .fav-pick-item .fp-meta span { background: #fff; padding: 1px 6px; border-radius: 4px; }
+    .fav-pick-item .fp-ico { font-size: 20px; color: #F59E0B; flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -520,6 +530,25 @@
   </div>
 </div>
 
+<!-- ===== お気に入りから差し替えモーダル ===== -->
+<div class="modal-overlay" id="favoritePickerModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="favoritePickerTitle">⭐ お気に入りから選ぶ</h2>
+      <button class="modal-close" id="favoritePickerClose">×</button>
+    </div>
+    <p class="sub-title" id="favoritePickerSub" style="margin: -8px 0 12px;"></p>
+    <div class="form-group" style="margin-bottom: 12px;">
+      <input type="text" id="favoritePickerSearch" placeholder="🔍 料理名で絞り込み" />
+    </div>
+    <div id="favoritePickerList"></div>
+    <div id="favoritePickerEmpty" class="empty-state hidden">
+      <div class="ico">⭐</div>
+      <div class="msg">お気に入り料理がまだありません</div>
+    </div>
+  </div>
+</div>
+
 <!-- ===== 余り物提案モーダル ===== -->
 <div class="modal-overlay" id="proposalsModal">
   <div class="modal">
@@ -623,6 +652,16 @@ const SEASON_INGREDIENTS = {
 };
 function currentSeasonIngredients() {
   return SEASON_INGREDIENTS[new Date().getMonth() + 1] || '';
+}
+// 旬食材リストから n 個ランダムにピック（各日のヒント用）
+function pickRandomSeasonItems(n = 3) {
+  const all = currentSeasonIngredients();
+  const items = all.split(/[、,]/).map(s => s.trim()).filter(Boolean);
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items.slice(0, n).join('、');
 }
 
 function getMondayOf(date) {
@@ -1013,6 +1052,12 @@ function renderMenu() {
       regenerateDish(date, meal, slot);
     });
   });
+  c.querySelectorAll('[data-action="pick-fav"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const { date, meal, slot } = btn.dataset;
+      openFavoritePicker(date, meal, slot);
+    });
+  });
 }
 
 function renderDish(dish, type, date, meal, slot) {
@@ -1032,9 +1077,10 @@ function renderDish(dish, type, date, meal, slot) {
         ${pfcRow}
       </div>
       <div class="dish-actions">
-        <button class="regen" data-action="regen-dish" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="この料理だけ再生成">🔄</button>
+        <button class="regen" data-action="regen-dish" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="この料理だけAIで再生成">🔄</button>
+        <button data-action="pick-fav" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="お気に入りから差し替え">📥</button>
         <button data-action="show-recipe" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="レシピを見る">📖</button>
-        <button class="fav ${isFav?'active':''}" data-action="fav" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="お気に入り">${isFav?'★':'☆'}</button>
+        <button class="fav ${isFav?'active':''}" data-action="fav" data-date="${date}" data-meal="${meal}" data-slot="${slot}" title="お気に入り登録">${isFav?'★':'☆'}</button>
       </div>
     </div>
   `;
@@ -1734,6 +1780,111 @@ async function regenerateDay(date) {
 }
 
 // 単一料理だけを再生成（主菜1品 or 副菜1品）
+// お気に入りピッカーモーダル
+let favoritePickerTarget = null;
+
+function openFavoritePicker(date, meal, slot) {
+  const dayObj = state.currentMenu?.days?.find(d => d.date === date);
+  if (!dayObj || !dayObj[meal]) return;
+  const oldDish = slot === 'main' ? dayObj[meal].main : (dayObj[meal].sides||[])[parseInt(slot.split('-')[1])];
+  const mealLabel = { breakfast:'朝食', lunch:'昼食', dinner:'夕食' }[meal];
+  const slotLabel = slot === 'main' ? '主菜' : '副菜';
+
+  favoritePickerTarget = { date, meal, slot };
+  $('favoritePickerSub').textContent = `${fmtMD(date)} ${mealLabel}の${slotLabel}「${oldDish?.name || ''}」を差し替え`;
+  $('favoritePickerSearch').value = '';
+  renderFavoritePickerList('');
+  $('favoritePickerModal').classList.add('show');
+  setTimeout(() => $('favoritePickerSearch').focus(), 100);
+}
+
+function renderFavoritePickerList(filterText) {
+  const list = $('favoritePickerList');
+  const empty = $('favoritePickerEmpty');
+  list.innerHTML = '';
+  const ft = (filterText || '').trim().toLowerCase();
+  const items = state.favorites.filter(f => !ft || (f.name||'').toLowerCase().includes(ft));
+  if (items.length === 0) {
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  items.forEach(f => {
+    const div = document.createElement('div');
+    div.className = 'fav-pick-item';
+    const ingCount = (f.ingredients||[]).length;
+    const n = f.nutrition;
+    const metaParts = [];
+    if (f.time) metaParts.push(`<span>⏱ ${escapeHtml(f.time)}</span>`);
+    if (ingCount > 0) metaParts.push(`<span>🥘 材料${ingCount}品</span>`);
+    if (n?.kcal) metaParts.push(`<span>🔥 ${n.kcal}kcal</span>`);
+    div.innerHTML = `
+      <div class="fp-ico">⭐</div>
+      <div class="fp-info">
+        <div class="fp-name">${escapeHtml(f.name||'')}</div>
+        ${metaParts.length ? `<div class="fp-meta">${metaParts.join('')}</div>` : ''}
+      </div>
+    `;
+    div.addEventListener('click', () => swapDishWithFavorite(f));
+    list.appendChild(div);
+  });
+}
+
+$('favoritePickerClose').addEventListener('click', () => $('favoritePickerModal').classList.remove('show'));
+$('favoritePickerModal').addEventListener('click', (e) => {
+  if (e.target.id === 'favoritePickerModal') $('favoritePickerModal').classList.remove('show');
+});
+$('favoritePickerSearch').addEventListener('input', (e) => renderFavoritePickerList(e.target.value));
+
+// 選択したお気に入り料理で差し替え
+async function swapDishWithFavorite(fav) {
+  if (!favoritePickerTarget) return;
+  const { date, meal, slot } = favoritePickerTarget;
+  // dish 形式に整える（必要なフィールド補完）
+  const newDish = {
+    name: fav.name || '',
+    servings: fav.servings || '4人分',
+    time: fav.time || '',
+    ingredients: (fav.ingredients || []).map(i => ({
+      name: i.name || '',
+      amount: i.amount || '',
+      // category が無い場合は other に
+      category: i.category || 'other'
+    })),
+    steps: fav.steps || [],
+    nutrition: fav.nutrition || { kcal: 0, protein: 0, fat: 0, carb: 0 }
+  };
+
+  const newDays = state.currentMenu.days.map(d => {
+    if (d.date !== date) return d;
+    const newDay = { ...d };
+    const newMealBlock = { ...newDay[meal] };
+    if (slot === 'main') {
+      newMealBlock.main = newDish;
+    } else {
+      const sideIdx = parseInt(slot.split('-')[1]);
+      const newSides = [...(newMealBlock.sides || [])];
+      newSides[sideIdx] = newDish;
+      newMealBlock.sides = newSides;
+    }
+    newDay[meal] = newMealBlock;
+    return newDay;
+  });
+
+  try {
+    const newShoppingList = aggregateShoppingList(newDays);
+    await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), {
+      days: newDays,
+      shoppingList: newShoppingList,
+      shoppingChecked: {}
+    });
+    $('favoritePickerModal').classList.remove('show');
+    showToast(`「${newDish.name}」に差し替えました ⭐`);
+  } catch (e) {
+    showToast('差し替え失敗: ' + e.message, true);
+  }
+}
+
 async function regenerateDish(date, meal, slot) {
   const apiKey = loadApiKey();
   if (!apiKey) { showToast('API キーが必要です', true); switchTab('settings'); return; }
@@ -2015,31 +2166,35 @@ function buildPrompt(opts, singleDate, excludeDishes = []) {
   const members = state.profile.members.map(m => `${m.name}（${m.age} / ${m.role}）`).join('、');
   const allExclude = [state.profile.exclude, opts.excludeOnce].filter(Boolean).join('、');
   const favTags = state.favorites.slice(0, 20).map(f => f.name).join('、');
-  const season = currentSeasonIngredients();
   const now = new Date();
   const mealLabels = opts.meals.map(m => ({breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[m])).join('・');
 
-  // ── system（共通プロンプト＝キャッシュ対象） ──
+  // ── system（共通プロンプト＝キャッシュ対象。各日リクエストで変わらない部分のみ） ──
   const system = `あなたは家庭の献立アドバイザーです。出力は必ず output_menu ツールで返してください。
 
 【家族構成】${members}
 【含める食事】${mealLabels}
-【現在】${now.getFullYear()}年${now.getMonth()+1}月（旬の食材を意識）
-${season ? `【今月の旬食材】${season}\n→ これらを優先的に取り入れる（無理に全部使わなくてOK）` : ''}
+【現在】${now.getFullYear()}年${now.getMonth()+1}月
 ${state.profile.notes ? `【家族の好み・備考】${state.profile.notes}` : ''}
 ${favTags ? `【家族のお気に入り料理（候補として優先的に検討）】${favTags}` : ''}
 
 【共通ルール】
 - 各食事は main（主菜）1品 + sides（副菜）${sidesCountLabel(opts.sidesCount)}
 - 子供がいる場合は辛さ控えめ、年齢に応じた配慮
-- 栄養バランス（肉・魚・野菜）を週でバランスよく
-- 同じ食材を複数日で使い回せるよう工夫
 - 各料理に詳細な材料（4人分換算、目安量）と作り方を含める
-- 材料の category は次のいずれか: "meat_fish"（肉・魚介）、"vegetables"（野菜・果物）、"seasonings"（調味料）、"other"（その他）
-- 各料理に nutrition（1人前の概算・整数）: kcal, protein(g), fat(g), carb(g)`;
+- 材料の category: "meat_fish"（肉・魚介）/ "vegetables"（野菜・果物）/ "seasonings"（調味料）/ "other"（その他）
+- 各料理に nutrition（1人前の概算・整数）: kcal, protein(g), fat(g), carb(g)
+
+【バラエティの絶対ルール（最重要）】
+- 主タンパク源（鶏・豚・牛・魚介・卵・大豆製品）を週でローテーション。同じ主タンパクが連続2日続かないこと
+- 同じ主要野菜（例:キャベツ、なす、トマト など）が連続3日以上続かないこと
+- 調理ジャンル（和食/洋食/中華/エスニック）もバラつかせる
+- 旬食材は「ヒント」として参考にする程度。**週に2〜3品まで**に抑え、毎日同じ旬食材を多用しない
+- 定番食材（じゃがいも、にんじん、玉ねぎ、豆腐、卵 等）も積極的に活用してバランスを取る`;
 
   // ── user（その回ごとに変わる部分） ──
   let datesPart, themeHint = '';
+  const seasonHint = pickRandomSeasonItems(3);  // 各日ランダムに3品だけ
   if (singleDate) {
     const weekdayIdx = (new Date(singleDate).getDay()+6)%7;
     datesPart = `${fmtJP(singleDate)}（${WEEKDAYS_LONG[weekdayIdx]}）の1日分のみ作成してください。`;
@@ -2056,6 +2211,7 @@ ${favTags ? `【家族のお気に入り料理（候補として優先的に検�
     ? `\n【既に出ている/最近出た料理（重複させない）】\n${excludeDishes.slice(0, 80).join('、')}\n→ 上記と同じor類似の料理名は避け、別の料理を提案してください。`
     : '';
   const budgetSection = opts.budget ? `\n【予算目安】1食あたり ${opts.budget}円程度（材料費）。これに収まる範囲で。` : '';
+  const seasonSection = seasonHint ? `\n【今日の旬食材ヒント（参考程度。多用は避ける）】${seasonHint}` : '';
 
   const prompt = `${datesPart}
 
@@ -2064,6 +2220,7 @@ ${opts.time ? `【調理時間】${opts.time}` : ''}
 ${budgetSection}
 ${opts.extra ? `【追加リクエスト】${opts.extra}` : ''}
 ${themeHint}
+${seasonSection}
 ${excludeSection}
 ${singleDate ? '' : '\nshoppingList は週全体の買い物リスト（同食材は集約）も含めてください。'}`;
 
