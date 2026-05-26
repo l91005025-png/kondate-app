@@ -294,6 +294,7 @@
           <select id="genWeekSelect">
             <option value="this">今週（月〜日）</option>
             <option value="next">来週（月〜日）</option>
+            <option value="next2">再来週（月〜日）</option>
           </select>
         </div>
 
@@ -1382,7 +1383,7 @@ JSON スキーマに厳密に従って出力してください。`;
       title: STR,
       style: STR,
       main: dishSchema,
-      sides: { type:'ARRAY', items: dishSchema },
+      sides: buildSidesSchema(dishSchema, sidesCount, 2),
       addedIngredients: { type:'ARRAY', items: STR }
     },
     required: ['title','style','main','sides']
@@ -1400,9 +1401,9 @@ async function generateMenu() {
   const apiKey = loadApiKey();
   if (!apiKey) { showToast('先に設定タブで API キーを登録してください', true); switchTab('settings'); return; }
 
-  const weekStartDate = $('genWeekSelect').value === 'next'
-    ? addDays(getMondayOf(new Date()), 7)
-    : getMondayOf(new Date());
+  const weekSel = $('genWeekSelect').value;
+  const weeksAhead = weekSel === 'next2' ? 2 : (weekSel === 'next' ? 1 : 0);
+  const weekStartDate = addDays(getMondayOf(new Date()), weeksAhead * 7);
   const meals = [];
   if ($('mealBreakfast').checked) meals.push('breakfast');
   if ($('mealLunch').checked) meals.push('lunch');
@@ -1419,8 +1420,29 @@ async function generateMenu() {
   };
 
   try {
-    showLoading('献立を考えています...');
-    const result = await callGemini(opts, null);
+    // 過去4週間で使った料理は避ける
+    const recentDishes = collectRecentDishes(4, opts.weekStart);
+    const generatedDishes = []; // この生成中に既に出た料理を追跡
+    const allDays = [];
+
+    for (let i = 0; i < 7; i++) {
+      const dateStr = fmtDate(addDays(weekStartDate, i));
+      showLoading(`献立を考えています... (${i+1}/7日目)`);
+      const excludeDishes = [...recentDishes, ...generatedDishes];
+      const dayResult = await callGemini(opts, dateStr, excludeDishes);
+      if (!dayResult.days || dayResult.days.length === 0) throw new Error(`${dateStr} の生成失敗`);
+      const day = dayResult.days[0];
+      allDays.push(day);
+      // この生成中の重複も避けるため累積
+      ['breakfast','lunch','dinner'].forEach(meal => {
+        const block = day[meal];
+        if (!block) return;
+        if (block.main?.name) generatedDishes.push(block.main.name);
+        (block.sides || []).forEach(s => { if (s.name) generatedDishes.push(s.name); });
+      });
+    }
+
+    const result = { days: allDays, shoppingList: aggregateShoppingList(allDays) };
     await saveMenu(opts.weekStart, result, opts);
     hideLoading();
     showToast('献立を生成しました ✨');
@@ -1433,6 +1455,27 @@ async function generateMenu() {
   }
 }
 
+// 過去N週間で使った料理名を収集（重複生成を避けるため）
+// excludeWeekStart: この週の献立は対象外（再生成中の自分自身を除外）
+function collectRecentDishes(weeksBack = 4, excludeWeekStart = null) {
+  const cutoffDate = addDays(new Date(), -weeksBack * 7);
+  const cutoff = fmtDate(cutoffDate);
+  const dishes = new Set();
+  (state.history || []).forEach(m => {
+    if (!m.weekStart || m.weekStart < cutoff) return;
+    if (excludeWeekStart && m.weekStart === excludeWeekStart) return;
+    (m.days || []).forEach(d => {
+      ['breakfast','lunch','dinner'].forEach(meal => {
+        const block = d[meal];
+        if (!block) return;
+        if (block.main?.name) dishes.add(block.main.name);
+        (block.sides || []).forEach(s => { if (s.name) dishes.add(s.name); });
+      });
+    });
+  });
+  return Array.from(dishes);
+}
+
 async function regenerateDay(date) {
   const apiKey = loadApiKey();
   if (!apiKey) { showToast('API キーが必要です', true); switchTab('settings'); return; }
@@ -1441,8 +1484,8 @@ async function regenerateDay(date) {
   if (!dayObj) return;
   const meals = ['breakfast','lunch','dinner'].filter(m => dayObj[m]);
 
-  // この日以外の料理を「重複させない」リストとして渡す
-  const excludeSet = new Set();
+  // この日以外の料理 + 過去4週間の料理を「重複させない」リストとして渡す
+  const excludeSet = new Set(collectRecentDishes(4, state.currentMenu.weekStart));
   state.currentMenu.days.forEach(d => {
     if (d.date === date) return;
     ['breakfast','lunch','dinner'].forEach(m => {
@@ -1490,8 +1533,11 @@ async function regenerateDish(date, meal, slot) {
   const mealLabel = { breakfast:'朝食', lunch:'昼食', dinner:'夕食' }[meal];
   const slotLabel = slot === 'main' ? '主菜' : '副菜';
 
-  // 重複させない料理リスト（自分自身を除く全料理）
-  const excludeDishes = listDishNames(state.currentMenu, { date, meal, slot });
+  // 重複させない料理リスト（自分自身を除く全料理 + 過去4週間）
+  const excludeDishes = Array.from(new Set([
+    ...listDishNames(state.currentMenu, { date, meal, slot }),
+    ...collectRecentDishes(4, state.currentMenu.weekStart)
+  ]));
 
   const members = state.profile.members.map(m => `${m.name}（${m.age}/${m.role}）`).join('、');
   const allExclude = state.profile.exclude || '';
@@ -1694,7 +1740,7 @@ async function geminiRequest(prompt, schema, opts = {}) {
 
 async function callGemini(opts, singleDate, excludeDishes = []) {
   const prompt = buildPrompt(opts, singleDate, excludeDishes);
-  const schema = buildSchema(opts.meals, singleDate);
+  const schema = buildSchema(opts.meals, singleDate, opts.sidesCount || 'auto');
   return await geminiRequest(prompt, schema);
 }
 
@@ -1787,14 +1833,27 @@ function makeDishSchema() {
   };
 }
 
-function buildSchema(meals, singleDate) {
+// sidesCount: 'auto' | '0' | '1' | '2' | '3'
+// Gemini にちょうど N 品を出させるための minItems/maxItems を付与
+function buildSidesSchema(dishSchema, sidesCount, maxAuto = 2) {
+  const s = { type: 'ARRAY', items: dishSchema };
+  if (sidesCount === 'auto') {
+    s.minItems = 1; s.maxItems = maxAuto;
+  } else {
+    const n = parseInt(sidesCount);
+    if (!isNaN(n)) { s.minItems = n; s.maxItems = n; }
+  }
+  return s;
+}
+
+function buildSchema(meals, singleDate, sidesCount = 'auto') {
   const STR = { type: 'STRING' };
   const dishSchema = makeDishSchema();
   const mealBlock = {
     type: 'OBJECT',
     properties: {
       main: dishSchema,
-      sides: { type: 'ARRAY', items: dishSchema }
+      sides: buildSidesSchema(dishSchema, sidesCount, 2)
     },
     required: ['main','sides']
   };
