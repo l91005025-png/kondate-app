@@ -133,10 +133,20 @@
     .shopping-section h3 { font-size: 13px; color: #16A34A; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
     .shopping-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #F8FAFC; border-radius: 10px; margin-bottom: 6px; }
     .shopping-item input[type="checkbox"] { width: 22px; height: 22px; accent-color: #16A34A; flex-shrink: 0; }
-    .shopping-item .item-text { flex: 1; }
+    .shopping-item .item-text { flex: 1; min-width: 0; }
     .shopping-item.checked .item-text { text-decoration: line-through; color: #94A3B8; }
+    .shopping-item.stocked { background: #FEF3C7; opacity: 0.7; }
+    .shopping-item.stocked .item-text { text-decoration: line-through; color: #92400E; }
     .shopping-item .item-name { font-size: 14px; font-weight: 600; }
-    .shopping-item .item-amount { font-size: 12px; color: #64748B; }
+    .shopping-item .item-amount { font-size: 12px; color: #64748B; cursor: pointer; }
+    .shopping-item .item-amount:hover { color: #16A34A; }
+    .shopping-item .item-amount.editing { display: inline; }
+    .shopping-item .amount-input { padding: 2px 6px; border: 1px solid #16A34A; border-radius: 4px; font-size: 12px; width: 100%; max-width: 200px; }
+    .shopping-item .stock-btn { background: transparent; border: none; padding: 4px 8px; border-radius: 6px; font-size: 16px; color: #94A3B8; flex-shrink: 0; }
+    .shopping-item .stock-btn:hover { background: #FEF3C7; color: #92400E; }
+    .shopping-item.stocked .stock-btn { color: #92400E; }
+    .stocked-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #92400E; background: #FEF3C7; padding: 8px 12px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+    .stocked-toggle:hover { background: #FDE68A; }
 
     /* ============ レシピモーダル ============ */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: flex-end; justify-content: center; z-index: 100; }
@@ -330,9 +340,22 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label>今回だけ除外する食材</label>
-          <input type="text" id="genExcludeOnce" placeholder="例: 鶏肉" />
+        <div class="grid-2">
+          <div class="form-group">
+            <label>1食あたり予算の目安</label>
+            <select id="genBudget">
+              <option value="">指定なし</option>
+              <option value="300">300円以内（節約）</option>
+              <option value="500">500円以内（標準）</option>
+              <option value="800">800円以内（ちょっと贅沢）</option>
+              <option value="1200">1,200円以内（パーティー寄り）</option>
+            </select>
+            <span class="hint">1人分の材料費目安（AI概算）</span>
+          </div>
+          <div class="form-group">
+            <label>今回だけ除外する食材</label>
+            <input type="text" id="genExcludeOnce" placeholder="例: 鶏肉" />
+          </div>
         </div>
 
         <div class="form-group">
@@ -569,6 +592,37 @@ const fmtMD = (s) => { const [y,m,d] = s.split('-'); return `${parseInt(m)}/${pa
 const fmtJP = (s) => { const [y,m,d] = s.split('-'); return `${y}年${parseInt(m)}月${parseInt(d)}日`; };
 const DAY_NAMES = ['日','月','火','水','木','金','土'];
 const WEEKDAYS_LONG = ['月曜日','火曜日','水曜日','木曜日','金曜日','土曜日','日曜日'];
+
+// 曜日ごとのテーマ（並列生成時にバラエティを促す）
+// インデックスは月=0, 火=1, ..., 日=6
+const WEEKDAY_THEMES = [
+  '週始めなのでさっぱり&簡単な和食寄り',
+  '中華系（炒め物や麺類など）',
+  '洋食系（パスタ・グリル・スープ・サラダ）',
+  '丼ものや一皿で完結する時短メニュー',
+  'がっつり系（揚げ物・肉料理）で週末感',
+  '家族で楽しめる賑やかな献立（鍋・ホットプレート等もOK）',
+  '翌週に備えて軽め＆冷蔵庫整理を意識した献立'
+];
+
+// 月別の旬食材（5月時点で確認、北日本〜西日本平均的な目安）
+const SEASON_INGREDIENTS = {
+  1: '大根、白菜、ほうれん草、春菊、ねぎ、ブリ、タラ、ヒラメ、みかん、りんご',
+  2: 'ねぎ、春菊、れんこん、菜の花、いわし、ヒラメ、ホタテ、いちご',
+  3: '菜の花、新玉ねぎ、グリーンピース、春キャベツ、はまぐり、サワラ、いちご',
+  4: 'たけのこ、アスパラガス、春キャベツ、新玉ねぎ、鯛、しらす、いちご',
+  5: '新じゃがいも、新玉ねぎ、そら豆、グリーンピース、アスパラガス、カツオ、アジ、いちご',
+  6: 'ナス、トマト、きゅうり、ピーマン、ズッキーニ、いわし、アジ、メロン、さくらんぼ',
+  7: 'とうもろこし、ピーマン、ゴーヤ、なす、トマト、うなぎ、すずき、桃、すいか',
+  8: 'なす、トマト、オクラ、ゴーヤ、とうもろこし、いわし、メバル、すいか、桃',
+  9: 'さつまいも、なす、きのこ類、さんま、戻り鰹、ぶどう、梨、いちじく',
+  10: 'きのこ類（しめじ・舞茸・椎茸）、れんこん、さつまいも、栗、さんま、鮭、柿、りんご',
+  11: 'れんこん、ほうれん草、白菜、ねぎ、ブリ、サバ、みかん、りんご、柿',
+  12: '大根、白菜、ねぎ、春菊、ブリ、タラ、カニ、みかん'
+};
+function currentSeasonIngredients() {
+  return SEASON_INGREDIENTS[new Date().getMonth() + 1] || '';
+}
 
 function getMondayOf(date) {
   const d = new Date(date);
@@ -1030,6 +1084,18 @@ function openRecipeFromDish(dish) {
     dish.steps.forEach(s => body += `<li>${escapeHtml(s)}</li>`);
     body += `</ol></div>`;
   }
+  // 外部リンク（YouTube動画 / 画像検索）
+  if (dish.name) {
+    const yt = `https://www.youtube.com/results?search_query=${encodeURIComponent(dish.name + ' 作り方')}`;
+    const img = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(dish.name + ' レシピ')}`;
+    body += `<div class="recipe-section">
+      <h3>もっと見る</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <a href="${yt}" target="_blank" rel="noopener" class="btn secondary small" style="flex:1; min-width:120px; text-decoration:none;">▶ YouTube動画</a>
+        <a href="${img}" target="_blank" rel="noopener" class="btn secondary small" style="flex:1; min-width:120px; text-decoration:none;">🖼 写真を検索</a>
+      </div>
+    </div>`;
+  }
   $('recipeModalBody').innerHTML = body;
   $('recipeModal').classList.add('show');
 }
@@ -1169,6 +1235,9 @@ function renderHistory() {
 // ============================================================
 // 買い物リスト
 // ============================================================
+// 「家にある」セクションの折りたたみ状態
+let shoppingShowStocked = false;
+
 function renderShopping() {
   const c = $('shoppingContainer');
   c.innerHTML = '';
@@ -1179,39 +1248,103 @@ function renderShopping() {
   $('shoppingEmpty').classList.add('hidden');
   const list = state.currentMenu.shoppingList;
   const checked = state.currentMenu.shoppingChecked || {};
+  const stocked = state.currentMenu.shoppingStocked || {};
+  const amountEdits = state.currentMenu.shoppingAmounts || {};
   const sections = [
-    ['meat_fish', '🐟 肉・魚'],
     ['vegetables', '🥬 野菜'],
+    ['meat_fish', '🐟 肉・魚'],
     ['seasonings', '🧂 調味料'],
     ['other', '🛒 その他']
   ];
+
+  // 「家にある」アイテム数を集計
+  let stockedCount = 0;
+  sections.forEach(([key]) => {
+    (list[key] || []).forEach((_, idx) => {
+      if (stocked[`${key}-${idx}`]) stockedCount++;
+    });
+  });
+
+  // 「家にある」セクションのトグル
+  if (stockedCount > 0) {
+    const toggle = document.createElement('div');
+    toggle.className = 'stocked-toggle';
+    toggle.innerHTML = `<span>📦 家にあるもの (${stockedCount}件)</span><span>${shoppingShowStocked ? '▲ 隠す' : '▼ 表示'}</span>`;
+    toggle.addEventListener('click', () => {
+      shoppingShowStocked = !shoppingShowStocked;
+      renderShopping();
+    });
+    c.appendChild(toggle);
+  }
+
   sections.forEach(([key, label]) => {
     const items = list[key] || [];
     if (items.length === 0) return;
     const sec = document.createElement('div');
     sec.className = 'shopping-section';
     sec.innerHTML = `<h3>${label}</h3>`;
+    let visibleCount = 0;
     items.forEach((it, idx) => {
       const itemKey = `${key}-${idx}`;
       const isChecked = !!checked[itemKey];
-      const row = document.createElement('label');
-      row.className = 'shopping-item' + (isChecked ? ' checked' : '');
+      const isStocked = !!stocked[itemKey];
+      if (isStocked && !shoppingShowStocked) return;
+      visibleCount++;
+      const customAmount = amountEdits[itemKey];
+      const displayAmount = customAmount !== undefined ? customAmount : (it.amount || '');
+      const row = document.createElement('div');
+      row.className = 'shopping-item' + (isChecked ? ' checked' : '') + (isStocked ? ' stocked' : '');
       row.innerHTML = `
         <input type="checkbox" ${isChecked?'checked':''} />
         <div class="item-text">
           <div class="item-name">${escapeHtml(it.name||'')}</div>
-          <div class="item-amount">${escapeHtml(it.amount||'')}</div>
+          <div class="item-amount" data-edit="amount" title="タップで量を編集">${escapeHtml(displayAmount)}</div>
         </div>
+        <button class="stock-btn" data-action="stock" title="${isStocked ? '買い物リストに戻す' : '家にある印を付ける'}">${isStocked ? '↩️' : '🏠'}</button>
       `;
+      // チェックボックス
       row.querySelector('input').addEventListener('change', async (e) => {
         const newChecked = Object.assign({}, state.currentMenu.shoppingChecked || {});
         if (e.target.checked) newChecked[itemKey] = true;
         else delete newChecked[itemKey];
         await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), { shoppingChecked: newChecked });
       });
+      // 量編集
+      row.querySelector('[data-edit="amount"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cur = row.querySelector('[data-edit="amount"]');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'amount-input';
+        input.value = displayAmount;
+        cur.replaceWith(input);
+        input.focus();
+        input.select();
+        const finish = async (save) => {
+          const newVal = save ? input.value.trim() : displayAmount;
+          const newAmounts = Object.assign({}, state.currentMenu.shoppingAmounts || {});
+          if (save && newVal !== it.amount) newAmounts[itemKey] = newVal;
+          else if (save && newVal === it.amount) delete newAmounts[itemKey];
+          if (save) await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), { shoppingAmounts: newAmounts });
+          else renderShopping();
+        };
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('keydown', (ke) => {
+          if (ke.key === 'Enter') { input.blur(); }
+          else if (ke.key === 'Escape') { finish(false); }
+        });
+      });
+      // 「家にある」ボタン
+      row.querySelector('[data-action="stock"]').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const newStocked = Object.assign({}, state.currentMenu.shoppingStocked || {});
+        if (isStocked) delete newStocked[itemKey];
+        else newStocked[itemKey] = true;
+        await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), { shoppingStocked: newStocked });
+      });
       sec.appendChild(row);
     });
-    c.appendChild(sec);
+    if (visibleCount > 0) c.appendChild(sec);
   });
 }
 
@@ -1415,6 +1548,7 @@ async function generateMenu() {
     meals,
     time: $('genTime').value,
     sidesCount: $('genSidesCount').value,  // 'auto' | '0' | '1' | '2' | '3'
+    budget: $('genBudget').value,
     excludeOnce: $('genExcludeOnce').value.trim(),
     extra: $('genExtraRequest').value.trim()
   };
@@ -1422,24 +1556,63 @@ async function generateMenu() {
   try {
     // 過去4週間で使った料理は避ける
     const recentDishes = collectRecentDishes(4, opts.weekStart);
-    const generatedDishes = []; // この生成中に既に出た料理を追跡
-    const allDays = [];
 
+    // 7日分を並列生成（曜日テーマヒントでバラエティ確保）
+    showLoading('7日分の献立を並列生成中...');
+    let completedCount = 0;
+    const dayPromises = [];
     for (let i = 0; i < 7; i++) {
       const dateStr = fmtDate(addDays(weekStartDate, i));
-      showLoading(`献立を考えています... (${i+1}/7日目)`);
-      const excludeDishes = [...recentDishes, ...generatedDishes];
-      const dayResult = await callGemini(opts, dateStr, excludeDishes);
-      if (!dayResult.days || dayResult.days.length === 0) throw new Error(`${dateStr} の生成失敗`);
-      const day = dayResult.days[0];
-      allDays.push(day);
-      // この生成中の重複も避けるため累積
-      ['breakfast','lunch','dinner'].forEach(meal => {
-        const block = day[meal];
-        if (!block) return;
-        if (block.main?.name) generatedDishes.push(block.main.name);
-        (block.sides || []).forEach(s => { if (s.name) generatedDishes.push(s.name); });
+      const p = callGemini(opts, dateStr, recentDishes).then(r => {
+        completedCount++;
+        showLoading(`献立を考えています... (${completedCount}/7日完了)`);
+        return r;
       });
+      dayPromises.push(p);
+    }
+    const dayResults = await Promise.all(dayPromises);
+    let allDays = dayResults.map(r => {
+      if (!r.days || r.days.length === 0) throw new Error('生成結果が空でした');
+      return r.days[0];
+    });
+
+    // 重複検知：同じ料理名が同一週内で出ていたら、後発の日を再生成（最大3回まで）
+    const dupResolveMax = 3;
+    for (let attempt = 0; attempt < dupResolveMax; attempt++) {
+      const seen = new Map();  // name -> first dayIdx
+      const dupDays = new Set();
+      allDays.forEach((day, idx) => {
+        ['breakfast','lunch','dinner'].forEach(meal => {
+          const block = day[meal];
+          if (!block) return;
+          [block.main, ...(block.sides||[])].filter(Boolean).forEach(dish => {
+            if (!dish.name) return;
+            if (seen.has(dish.name)) dupDays.add(idx);
+            else seen.set(dish.name, idx);
+          });
+        });
+      });
+      if (dupDays.size === 0) break;
+      showLoading(`重複を解消中... (${dupDays.size}日を再生成)`);
+      // 確定済みの料理名を除外リストに
+      const fixedDishes = [];
+      allDays.forEach((day, idx) => {
+        if (dupDays.has(idx)) return;
+        ['breakfast','lunch','dinner'].forEach(meal => {
+          const block = day[meal];
+          if (!block) return;
+          if (block.main?.name) fixedDishes.push(block.main.name);
+          (block.sides||[]).forEach(s => s.name && fixedDishes.push(s.name));
+        });
+      });
+      const excludeForRetry = [...recentDishes, ...fixedDishes];
+      // 重複日を並列再生成
+      const retryPromises = Array.from(dupDays).map(idx => {
+        const dateStr = fmtDate(addDays(weekStartDate, idx));
+        return callGemini(opts, dateStr, excludeForRetry).then(r => ({ idx, day: r.days?.[0] }));
+      });
+      const retryResults = await Promise.all(retryPromises);
+      retryResults.forEach(({ idx, day }) => { if (day) allDays[idx] = day; });
     }
 
     const result = { days: allDays, shoppingList: aggregateShoppingList(allDays) };
@@ -1756,12 +1929,16 @@ function buildPrompt(opts, singleDate, excludeDishes = []) {
   const members = state.profile.members.map(m => `${m.name}（${m.age} / ${m.role}）`).join('、');
   const allExclude = [state.profile.exclude, opts.excludeOnce].filter(Boolean).join('、');
   const favTags = state.favorites.slice(0, 20).map(f => f.name).join('、');
+  const season = currentSeasonIngredients();
+  const now = new Date();
 
   const mealLabels = opts.meals.map(m => ({breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[m])).join('・');
 
-  let datesPart;
+  let datesPart, themeHint = '';
   if (singleDate) {
-    datesPart = `${fmtJP(singleDate)}（${WEEKDAYS_LONG[(new Date(singleDate).getDay()+6)%7]}）の1日分のみ作成してください。`;
+    const weekdayIdx = (new Date(singleDate).getDay()+6)%7;  // 月=0
+    datesPart = `${fmtJP(singleDate)}（${WEEKDAYS_LONG[weekdayIdx]}）の1日分のみ作成してください。`;
+    themeHint = `\n【この曜日のテーマヒント】${WEEKDAY_THEMES[weekdayIdx]}（参考程度、無理に従わなくてもよい）`;
   } else {
     const start = new Date(opts.weekStart);
     const dates = Array.from({length:7}, (_,i) => {
@@ -1772,18 +1949,25 @@ function buildPrompt(opts, singleDate, excludeDishes = []) {
   }
 
   const excludeSection = excludeDishes.length > 0
-    ? `\n【既に同じ週で出ている料理（重複させない）】\n${excludeDishes.join('、')}\n→ 上記と完全に同じ料理名は避け、別の料理を提案してください。`
+    ? `\n【既に出ている/最近出た料理（重複させない）】\n${excludeDishes.slice(0, 60).join('、')}\n→ 上記と同じor類似の料理名は避け、別の料理を提案してください。`
     : '';
+
+  // 予算（1日あたり概算）
+  const budgetSection = opts.budget ? `\n【予算目安】1食あたり ${opts.budget}円程度（材料費）。これに収まる範囲で。` : '';
 
   return `あなたは家庭の献立アドバイザーです。以下の条件で献立を作成してください。
 
 【家族構成】${members}
 【含める食事】${mealLabels}
+【現在】${now.getFullYear()}年${now.getMonth()+1}月（旬の食材を意識）
+${season ? `【今月の旬食材】${season}\n→ これらを優先的に取り入れる（無理に全部使わなくてOK）` : ''}
 ${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
 ${opts.time ? `【調理時間】${opts.time}` : ''}
+${budgetSection}
 ${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
 ${opts.extra ? `【追加リクエスト】${opts.extra}` : ''}
 ${favTags ? `【家族のお気に入り料理（候補として優先的に検討）】${favTags}` : ''}
+${themeHint}
 ${excludeSection}
 
 ${datesPart}
