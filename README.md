@@ -1,6 +1,6 @@
 # 週間献立アプリ（PWA）
 
-家族で共有できる週間献立アプリ。Google Gemini（無料枠）で献立を自動生成し、Firebase Firestore で家族間共有、GitHub Pages でホスティング。
+家族で共有できる週間献立アプリ。Anthropic Claude API（Tool use + Prompt caching）で献立を自動生成し、Firebase Firestore で家族間共有、GitHub Pages でホスティング。
 
 - 📅 週単位の献立カード表示
 - ✨ AI（Gemini）で1週間分を一括生成、1日だけ再生成も可能
@@ -61,7 +61,7 @@ firebase deploy --only firestore:rules
 1. 公開された URL にスマホでアクセス
 2. ホーム画面に追加（Safari: 共有 → ホーム画面に追加 / Chrome: メニュー → アプリをインストール）
 3. **家族コード**（任意の合言葉、例: `tanaka-2026`）と自分の名前を入力
-4. 設定タブで **Gemini API キー** を登録（[Google AI Studio](https://aistudio.google.com/apikey) で無料取得）
+4. 設定タブで **Anthropic API キー** を登録（[Anthropic Console](https://console.anthropic.com/settings/keys) で作成。Pro プランとは別に最低5ドルのクレジット購入が必要）
 5. 家族メンバーには **同じ家族コード** を共有してもらう
 
 ## データ構造（Firestore）
@@ -78,7 +78,8 @@ families/
 
 ## 注意事項
 
-- **Gemini API キーは各端末のブラウザに保存される**（共有はされない）。各人が自分のキーを取得して登録。
+- **Anthropic API キーは各端末のブラウザに保存される**（共有はされない）。各人が自分のキーを取得して登録。
+- デフォルトモデルは **Claude Haiku 4.5**（家族用途で月数十円〜）。設定で Sonnet 4.5 にも切替可能。
 - 家族コードは「共有秘密」として機能。**他人に知られると献立データが見える**ので、推測しにくいものを選ぶ。
 - Firebase の無料枠（Spark プラン）で十分動作する想定。
 

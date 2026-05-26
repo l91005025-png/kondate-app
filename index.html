@@ -285,7 +285,7 @@
     <!-- ===== 生成タブ ===== -->
     <section id="page-generate" class="page hidden">
       <div id="apiKeyWarning" class="api-warning hidden">
-        ⚠️ Gemini API キーが未設定です。<a href="#" id="goToSettingsFromWarn">設定タブ</a>で登録してください（無料で取得できます）
+        ⚠️ Claude API キーが未設定です。<a href="#" id="goToSettingsFromWarn">設定タブ</a>で登録してください
       </div>
 
       <div class="gen-mode-tabs">
@@ -459,26 +459,25 @@
       </div>
 
       <div class="card">
-        <h2>🔑 Gemini API キー</h2>
+        <h2>🔑 Anthropic API キー</h2>
         <p class="sub-title">この端末のブラウザにのみ保存されます（家族と共有はされません）</p>
 
         <div class="form-group">
           <label>APIキー</label>
-          <input type="password" id="apiKeyInput" placeholder="AIza..." />
+          <input type="password" id="apiKeyInput" placeholder="sk-ant-..." />
           <span class="hint">
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:#16A34A; font-weight:600;">Google AI Studio</a>
-            で無料取得できます
+            <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:#16A34A; font-weight:600;">Anthropic Console</a>
+            で作成（Pro プランとは別に、最低5ドルからのクレジット購入が必要）
           </span>
         </div>
 
         <div class="form-group">
           <label>使用モデル</label>
           <select id="modelSelect">
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash（推奨・無料枠15回/分）</option>
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash（品質高・無料枠5回/分のみ）</option>
-            <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite（無料枠30回/分・最速）</option>
+            <option value="claude-haiku-4-5">Claude Haiku 4.5（推奨・月数十円〜）</option>
+            <option value="claude-sonnet-4-5">Claude Sonnet 4.5（高品質・月100〜200円）</option>
           </select>
-          <span class="hint">並列生成のため、週間献立は5回以上のリクエストが必要です。2.5 Flashは枠超過しやすいので注意</span>
+          <span class="hint">家族用途なら Haiku で十分。コストは Anthropic Console で確認できます</span>
         </div>
 
         <button class="btn" id="saveApiKeyBtn">APIキーを保存</button>
@@ -645,11 +644,20 @@ function showToast(msg, isError=false) {
   if (isError) console.error('[Toast]', msg);
 }
 
-// 429/quota系エラーには案内を付加
+// よくあるエラーには案内を付加
 function enhanceErr(e) {
   const msg = e?.message || String(e);
-  if (/429|quota|exceeded/i.test(msg)) {
-    return msg + '\n→ 設定タブで「Gemini 2.0 Flash」に切り替えると無料枠が3倍広がります';
+  if (/401|authentication|invalid.*api.*key|invalid x-api-key/i.test(msg)) {
+    return msg + '\n→ 設定タブで Anthropic API キーを再確認してください（sk-ant- で始まるキー）';
+  }
+  if (/credit balance|insufficient.*balance|billing/i.test(msg)) {
+    return msg + '\n→ Anthropic Console (https://console.anthropic.com/) でクレジットの残高を確認してください';
+  }
+  if (/429|rate.*limit/i.test(msg)) {
+    return msg + '\n→ 少し待ってから再試行してください';
+  }
+  if (/529|overload/i.test(msg)) {
+    return msg + '\n→ Claude が混雑中です。少し待ってから再試行してください';
   }
   return msg;
 }
@@ -849,15 +857,21 @@ $('saveProfileBtn').addEventListener('click', async () => {
 // ============================================================
 // API キー（端末ローカル保存）
 // ============================================================
-function loadApiKey() { return localStorage.getItem('geminiApiKey') || ''; }
-function loadModel() { return localStorage.getItem('geminiModel') || 'gemini-2.5-flash'; }
+function loadApiKey() { return localStorage.getItem('anthropicApiKey') || ''; }
+function loadModel() { return localStorage.getItem('claudeModel') || 'claude-haiku-4-5'; }
 
 $('saveApiKeyBtn').addEventListener('click', () => {
   const key = $('apiKeyInput').value.trim();
   const model = $('modelSelect').value;
   if (!key) { showToast('APIキーを入力してください', true); return; }
-  localStorage.setItem('geminiApiKey', key);
-  localStorage.setItem('geminiModel', model);
+  if (!key.startsWith('sk-ant-')) {
+    if (!confirm('APIキーが「sk-ant-」で始まっていません。Anthropic Console のキーで間違いないですか？\n（このまま保存を続けますか？）')) return;
+  }
+  localStorage.setItem('anthropicApiKey', key);
+  localStorage.setItem('claudeModel', model);
+  // 旧 Gemini キーがあれば削除
+  localStorage.removeItem('geminiApiKey');
+  localStorage.removeItem('geminiModel');
   showToast('APIキーを保存しました');
   checkApiKeyWarning();
 });
@@ -868,6 +882,14 @@ function checkApiKeyWarning() {
   if (has) {
     $('apiKeyInput').value = loadApiKey();
     $('modelSelect').value = loadModel();
+  } else if (localStorage.getItem('geminiApiKey')) {
+    // 旧 Gemini ユーザーへの案内（一度きり）
+    if (!localStorage.getItem('migrationShown')) {
+      localStorage.setItem('migrationShown', '1');
+      setTimeout(() => {
+        showToast('AIをGeminiからClaudeに切替えました。\n設定タブでAnthropic APIキーを登録してください', true);
+      }, 800);
+    }
   }
 }
 
@@ -1472,16 +1494,11 @@ async function callGeminiProposals(ingredientsText, meal, extra, sidesCount = 'a
   const mealLabel = { breakfast:'朝食', lunch:'昼食', dinner:'夕食' }[meal];
   const favTags = state.favorites.slice(0, 10).map(f => f.name).join('、');
 
-  const prompt = `あなたは家庭の献立アドバイザーです。家にある以下の食材を使った${mealLabel}を3案提案してください。
+  const system = `あなたは家庭の献立アドバイザーです。家にある食材を使った${mealLabel}を3案、output_proposals ツールで返してください。
 
 【家族構成】${members}
-${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
 ${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
-${extra ? `【追加リクエスト】${extra}` : ''}
 ${favTags ? `【家族のお気に入り料理】${favTags}（テイスト参考）` : ''}
-
-【手持ちの食材】
-${ingredientsText}
 
 【ルール】
 - ご飯・パン・麺・卵・油・砂糖・塩・しょうゆ・味噌・みりん・酢・酒・コンソメ・だしの素・にんにく・しょうが・ねぎ・マヨネーズ・ケチャップ などの常備食材・調味料は家にある前提で自由に使ってOK
@@ -1489,32 +1506,34 @@ ${ingredientsText}
 - 手持ちの食材をできるだけ無駄なく使う
 - 3案はそれぞれ違うジャンル・調理法・味付け（和食・洋食・中華・エスニックなど）でバリエーションを出す
 - 各料理に詳細な材料(4人分換算、目安量)と作り方を含める
-- 各料理に nutrition（1人前の概算・整数）: kcal, protein(g), fat(g), carb(g)
+- 各料理に nutrition（1人前の概算・整数）: kcal, protein, fat, carb
 - 必要なら1〜2品の追加買い物を許可。その場合は addedIngredients に明記
 - title は「料理ジャンル + 主菜名（+副菜）」の形式（例:「和風 鶏もも肉の照り焼き + 野菜サラダ」）
-- style は「和食」「洋食」「中華」「エスニック」などのジャンル名
+- style は「和食」「洋食」「中華」「エスニック」などのジャンル名`;
 
-JSON スキーマに厳密に従って出力してください。`;
+  const prompt = `${allExclude ? `【除外食材】${allExclude}（絶対に使わない）\n` : ''}${extra ? `【追加リクエスト】${extra}\n` : ''}
+【手持ちの食材】
+${ingredientsText}`;
 
-  const STR = { type:'STRING' };
-  const INT = { type:'INTEGER' };
+  const STR = { type:'string' };
+  const INT = { type:'integer' };
   const dishSchema = {
-    type:'OBJECT',
+    type:'object',
     properties: {
       name: STR,
       servings: STR,
       time: STR,
       ingredients: {
-        type:'ARRAY',
+        type:'array',
         items: {
-          type:'OBJECT',
+          type:'object',
           properties: { name: STR, amount: STR },
           required: ['name','amount']
         }
       },
-      steps: { type:'ARRAY', items: STR },
+      steps: { type:'array', items: STR },
       nutrition: {
-        type: 'OBJECT',
+        type: 'object',
         properties: { kcal: INT, protein: INT, fat: INT, carb: INT },
         required: ['kcal','protein','fat','carb']
       }
@@ -1522,23 +1541,30 @@ JSON スキーマに厳密に従って出力してください。`;
     required: ['name','ingredients','steps','nutrition']
   };
   const proposalSchema = {
-    type:'OBJECT',
+    type:'object',
     properties: {
       title: STR,
       style: STR,
       main: dishSchema,
       sides: buildSidesSchema(dishSchema, sidesCount, 2),
-      addedIngredients: { type:'ARRAY', items: STR }
+      addedIngredients: { type:'array', items: STR }
     },
     required: ['title','style','main','sides']
   };
   const schema = {
-    type:'OBJECT',
-    properties: { proposals: { type:'ARRAY', items: proposalSchema } },
+    type:'object',
+    properties: { proposals: { type:'array', items: proposalSchema, minItems: 3, maxItems: 3 } },
     required: ['proposals']
   };
 
-  return await geminiRequest(prompt, schema, { temperature: 1.0, maxOutputTokens: 24576 });
+  return await claudeRequest({
+    system, prompt,
+    toolName: 'output_proposals',
+    toolDescription: '余り物食材から3案の献立を構造化して返す',
+    toolSchema: schema,
+    temperature: 1.0,
+    maxTokens: 8192
+  });
 }
 
 async function generateMenu() {
@@ -1574,7 +1600,7 @@ async function generateMenu() {
     let completedCount = 0;
     const dayResults = await parallelLimit(
       Array.from({length: 7}, (_, i) => i),
-      3,
+      5,
       async (i) => {
         const dateStr = fmtDate(addDays(weekStartDate, i));
         const r = await callGemini(opts, dateStr, recentDishes);
@@ -1618,9 +1644,9 @@ async function generateMenu() {
         });
       });
       const excludeForRetry = [...recentDishes, ...fixedDishes];
-      // 重複日を並列再生成（並列度3）
+      // 重複日を並列再生成（並列度5）
       const dupIndices = Array.from(dupDays);
-      const retryResults = await parallelLimit(dupIndices, 3, async (idx) => {
+      const retryResults = await parallelLimit(dupIndices, 5, async (idx) => {
         const dateStr = fmtDate(addDays(weekStartDate, idx));
         const r = await callGemini(opts, dateStr, excludeForRetry);
         return { idx, day: r.days?.[0] };
@@ -1730,33 +1756,40 @@ async function regenerateDish(date, meal, slot) {
   const favTags = state.favorites.slice(0, 10).map(f => f.name).join('、');
   const mainName = dayObj[meal].main?.name || '';
 
-  const prompt = `${fmtJP(date)}（${WEEKDAYS_LONG[(new Date(date).getDay()+6)%7]}）の${mealLabel}の${slotLabel}を「${oldDish?.name || ''}」から別の料理に差し替えてください。
+  const system = `あなたは家庭の献立アドバイザーです。1品だけ料理を提案してください。output_dish ツールで返してください。
 
 【家族構成】${members}
-${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
 ${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
 ${favTags ? `【家族のお気に入り料理】${favTags}（候補として優先）` : ''}
-
-${slot === 'main' ? '' : `【同じ食事の主菜】${mainName}（これと相性の良い副菜にする）`}
-
-【同じ週で既に出ている料理（絶対に重複させない）】
-${excludeDishes.join('、') || '（なし）'}
 
 【ルール】
 - ${slotLabel}として1品だけ提案
 - 主菜なら主菜らしい料理、副菜なら副菜らしい料理に
 - 子供がいる場合は辛さ控えめ
 - 4人分換算の詳細な材料と作り方を含める
-- 材料の category: "meat_fish"/"vegetables"/"seasonings"/"other" のいずれか
-- nutrition（1人前の概算・整数）: kcal, protein(g), fat(g), carb(g)
+- 材料の category: "meat_fish"/"vegetables"/"seasonings"/"other"
+- nutrition（1人前の概算・整数）: kcal, protein, fat, carb`;
 
-JSON スキーマに従って単一料理（dish）オブジェクトを返してください。`;
+  const prompt = `${fmtJP(date)}（${WEEKDAYS_LONG[(new Date(date).getDay()+6)%7]}）の${mealLabel}の${slotLabel}を「${oldDish?.name || ''}」から別の料理に差し替えてください。
+
+${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
+${slot === 'main' ? '' : `【同じ食事の主菜】${mainName}（これと相性の良い副菜にする）`}
+
+【同じ週で既に出ている/最近出た料理（重複させない）】
+${excludeDishes.slice(0, 80).join('、') || '（なし）'}`;
 
   const schema = makeDishSchema();
 
   try {
     showLoading(`${slotLabel}を考えています...`);
-    const newDish = await geminiRequest(prompt, schema, { temperature: 1.0, maxOutputTokens: 4096 });
+    const newDish = await claudeRequest({
+      system, prompt,
+      toolName: 'output_dish',
+      toolDescription: '1品の料理データを構造化形式で返す',
+      toolSchema: schema,
+      temperature: 1.0,
+      maxTokens: 2048
+    });
     // 該当 dish を差し替え
     const newDays = state.currentMenu.days.map(d => {
       if (d.date !== date) return d;
@@ -1856,26 +1889,30 @@ async function saveMenu(weekStart, result, opts) {
 // ============================================================
 
 // 503/429/500 のときは指数バックオフでリトライ
+const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_VERSION = '2023-06-01';
+
 async function fetchWithRetry(url, opts, maxRetries = 5) {
   let lastErr;
   for (let i = 0; i < maxRetries; i++) {
     try {
       const res = await fetch(url, opts);
-      if ([500, 502, 503, 504, 429].includes(res.status) && i < maxRetries - 1) {
+      // 429 / 5xx / Anthropic overloaded(529) はリトライ
+      if ([500, 502, 503, 504, 529, 429].includes(res.status) && i < maxRetries - 1) {
         let delayMs;
-        if (res.status === 429) {
-          // Gemini指定のretry秒数があればそれを使う（最大65秒）
-          const cloned = res.clone();
-          const body = await cloned.text().catch(() => '');
-          const retrySec = parseRetryDelaySec(body);
-          delayMs = retrySec ? Math.min(retrySec * 1000 + 1500, 65000) : (5000 + Math.random() * 2000);
+        const retryAfter = res.headers.get('retry-after');
+        if (retryAfter) {
+          const sec = parseInt(retryAfter, 10);
+          delayMs = isNaN(sec) ? 5000 : Math.min(sec * 1000 + 500, 65000);
         } else {
-          delayMs = 1500 * Math.pow(2, i) + Math.random() * 500;
+          delayMs = 2000 * Math.pow(2, i) + Math.random() * 500;
         }
-        console.warn(`[Gemini] HTTP ${res.status}, retry in ${Math.round(delayMs/1000)}s (${i+1}/${maxRetries-1})`);
+        console.warn(`[Claude] HTTP ${res.status}, retry in ${Math.round(delayMs/1000)}s (${i+1}/${maxRetries-1})`);
         if (showLoading._currentMsg) {
           const sec = Math.ceil(delayMs / 1000);
-          const reason = res.status === 429 ? `無料枠回復を待っています（約${sec}秒）` : `リトライ中 ${i+1}/${maxRetries-1}`;
+          const reason = res.status === 429 ? `レート上限のため待機中（約${sec}秒）` :
+                         res.status === 529 ? `Claudeが混雑中、リトライ（約${sec}秒）` :
+                         `リトライ中 ${i+1}/${maxRetries-1}`;
           $('loadingMsg').textContent = showLoading._currentMsg + `\n${reason}`;
         }
         await sleep(delayMs);
@@ -1885,8 +1922,8 @@ async function fetchWithRetry(url, opts, maxRetries = 5) {
     } catch (e) {
       lastErr = e;
       if (i < maxRetries - 1) {
-        const delay = 1500 * Math.pow(2, i);
-        console.warn(`[Gemini] Network error, retry in ${delay}ms:`, e.message);
+        const delay = 2000 * Math.pow(2, i);
+        console.warn(`[Claude] Network error, retry in ${delay}ms:`, e.message);
         await sleep(delay);
         continue;
       }
@@ -1896,49 +1933,73 @@ async function fetchWithRetry(url, opts, maxRetries = 5) {
   throw lastErr || new Error('リトライ上限到達');
 }
 
-// Gemini に問い合わせ、JSON をパースして返す（共通処理）
-async function geminiRequest(prompt, schema, opts = {}) {
+// Claude に Tool Use で構造化出力を要求する共通関数
+//   system: 共通プロンプト（prompt caching 対象）
+//   prompt: その回固有のユーザーメッセージ
+//   toolName / toolDescription / toolSchema: 出力JSONを定義する Tool
+async function claudeRequest({ system, prompt, toolName, toolDescription, toolSchema, maxTokens = 8192, temperature = 0.9 }) {
   const apiKey = loadApiKey();
   const model = loadModel();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  if (!apiKey) throw new Error('Anthropic API キーが未設定です');
+
+  // system はキャッシュ対象に。短すぎるとキャッシュ無効だが、家族プロフィール+季節食材+ルールで十分な長さ
   const body = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-      temperature: opts.temperature ?? 0.9,
-      maxOutputTokens: opts.maxOutputTokens ?? 32768
-    }
+    model,
+    max_tokens: maxTokens,
+    temperature,
+    system: [
+      { type: 'text', text: system, cache_control: { type: 'ephemeral' } }
+    ],
+    messages: [{ role: 'user', content: prompt }],
+    tools: [{
+      name: toolName,
+      description: toolDescription,
+      input_schema: toolSchema
+    }],
+    tool_choice: { type: 'tool', name: toolName }
   };
-  console.log('[Gemini] Request body:', body);
-  const res = await fetchWithRetry(url, {
+
+  const res = await fetchWithRetry(ANTHROPIC_BASE_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify(body)
   });
+
   const respText = await res.text();
-  console.log('[Gemini] Response status:', res.status, 'body:', respText.slice(0, 2000));
   if (!res.ok) {
     let msg = respText;
     try { msg = JSON.parse(respText).error?.message || respText; } catch {}
     throw new Error(`HTTP ${res.status}: ${msg}`);
   }
-  let data;
-  try { data = JSON.parse(respText); } catch (e) { throw new Error('JSON パース失敗: ' + respText.slice(0,200)); }
-  const finishReason = data.candidates?.[0]?.finishReason;
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    const promptFeedback = data.promptFeedback ? JSON.stringify(data.promptFeedback) : '';
-    throw new Error(`応答が空（finishReason=${finishReason}）${promptFeedback}`);
+  const data = JSON.parse(respText);
+  // 使用量ログ（コスト把握用）
+  if (data.usage) {
+    console.log('[Claude] usage:', data.usage, 'stop:', data.stop_reason);
   }
-  try { return JSON.parse(text); }
-  catch (e) { throw new Error('JSON 解析失敗: ' + text.slice(0,200)); }
+  const toolUse = (data.content || []).find(c => c.type === 'tool_use');
+  if (!toolUse) {
+    const text = (data.content || []).find(c => c.type === 'text')?.text || '';
+    throw new Error(`tool_use 応答なし。stop_reason=${data.stop_reason || '?'} ${text.slice(0,200)}`);
+  }
+  return toolUse.input;
 }
 
 async function callGemini(opts, singleDate, excludeDishes = []) {
-  const prompt = buildPrompt(opts, singleDate, excludeDishes);
-  const schema = buildSchema(opts.meals, singleDate, opts.sidesCount || 'auto');
-  return await geminiRequest(prompt, schema);
+  // 関数名は互換性のため残す（中身は Claude）
+  const { system, prompt } = buildPrompt(opts, singleDate, excludeDishes);
+  const toolSchema = buildSchema(opts.meals, singleDate, opts.sidesCount || 'auto');
+  return await claudeRequest({
+    system, prompt,
+    toolName: 'output_menu',
+    toolDescription: '生成した献立データを構造化形式で返す',
+    toolSchema,
+    maxTokens: singleDate ? 4096 : 16384
+  });
 }
 
 function sidesCountLabel(sc) {
@@ -1949,18 +2010,38 @@ function sidesCountLabel(sc) {
   return '1〜2品（料理に応じて）';
 }
 
+// system と user を返す（system は家族プロフィール等の共通部分。prompt caching 対象）
 function buildPrompt(opts, singleDate, excludeDishes = []) {
   const members = state.profile.members.map(m => `${m.name}（${m.age} / ${m.role}）`).join('、');
   const allExclude = [state.profile.exclude, opts.excludeOnce].filter(Boolean).join('、');
   const favTags = state.favorites.slice(0, 20).map(f => f.name).join('、');
   const season = currentSeasonIngredients();
   const now = new Date();
-
   const mealLabels = opts.meals.map(m => ({breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[m])).join('・');
 
+  // ── system（共通プロンプト＝キャッシュ対象） ──
+  const system = `あなたは家庭の献立アドバイザーです。出力は必ず output_menu ツールで返してください。
+
+【家族構成】${members}
+【含める食事】${mealLabels}
+【現在】${now.getFullYear()}年${now.getMonth()+1}月（旬の食材を意識）
+${season ? `【今月の旬食材】${season}\n→ これらを優先的に取り入れる（無理に全部使わなくてOK）` : ''}
+${state.profile.notes ? `【家族の好み・備考】${state.profile.notes}` : ''}
+${favTags ? `【家族のお気に入り料理（候補として優先的に検討）】${favTags}` : ''}
+
+【共通ルール】
+- 各食事は main（主菜）1品 + sides（副菜）${sidesCountLabel(opts.sidesCount)}
+- 子供がいる場合は辛さ控えめ、年齢に応じた配慮
+- 栄養バランス（肉・魚・野菜）を週でバランスよく
+- 同じ食材を複数日で使い回せるよう工夫
+- 各料理に詳細な材料（4人分換算、目安量）と作り方を含める
+- 材料の category は次のいずれか: "meat_fish"（肉・魚介）、"vegetables"（野菜・果物）、"seasonings"（調味料）、"other"（その他）
+- 各料理に nutrition（1人前の概算・整数）: kcal, protein(g), fat(g), carb(g)`;
+
+  // ── user（その回ごとに変わる部分） ──
   let datesPart, themeHint = '';
   if (singleDate) {
-    const weekdayIdx = (new Date(singleDate).getDay()+6)%7;  // 月=0
+    const weekdayIdx = (new Date(singleDate).getDay()+6)%7;
     datesPart = `${fmtJP(singleDate)}（${WEEKDAYS_LONG[weekdayIdx]}）の1日分のみ作成してください。`;
     themeHint = `\n【この曜日のテーマヒント】${WEEKDAY_THEMES[weekdayIdx]}（参考程度、無理に従わなくてもよい）`;
   } else {
@@ -1971,68 +2052,49 @@ function buildPrompt(opts, singleDate, excludeDishes = []) {
     }).join('、');
     datesPart = `${dates} の月〜日 7日分を作成してください。各日の date は YYYY-MM-DD 形式（月曜=${opts.weekStart}）。`;
   }
-
   const excludeSection = excludeDishes.length > 0
-    ? `\n【既に出ている/最近出た料理（重複させない）】\n${excludeDishes.slice(0, 60).join('、')}\n→ 上記と同じor類似の料理名は避け、別の料理を提案してください。`
+    ? `\n【既に出ている/最近出た料理（重複させない）】\n${excludeDishes.slice(0, 80).join('、')}\n→ 上記と同じor類似の料理名は避け、別の料理を提案してください。`
     : '';
-
-  // 予算（1日あたり概算）
   const budgetSection = opts.budget ? `\n【予算目安】1食あたり ${opts.budget}円程度（材料費）。これに収まる範囲で。` : '';
 
-  return `あなたは家庭の献立アドバイザーです。以下の条件で献立を作成してください。
+  const prompt = `${datesPart}
 
-【家族構成】${members}
-【含める食事】${mealLabels}
-【現在】${now.getFullYear()}年${now.getMonth()+1}月（旬の食材を意識）
-${season ? `【今月の旬食材】${season}\n→ これらを優先的に取り入れる（無理に全部使わなくてOK）` : ''}
-${allExclude ? `【除外食材】${allExclude}（絶対に使わない）` : ''}
+${allExclude ? `【今回の除外食材】${allExclude}（絶対に使わない）` : ''}
 ${opts.time ? `【調理時間】${opts.time}` : ''}
 ${budgetSection}
-${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
 ${opts.extra ? `【追加リクエスト】${opts.extra}` : ''}
-${favTags ? `【家族のお気に入り料理（候補として優先的に検討）】${favTags}` : ''}
 ${themeHint}
 ${excludeSection}
+${singleDate ? '' : '\nshoppingList は週全体の買い物リスト（同食材は集約）も含めてください。'}`;
 
-${datesPart}
-
-【ルール】
-- 各食事は main（主菜）1品 + sides（副菜）${sidesCountLabel(opts.sidesCount)}
-- 子供がいる場合は辛さ控えめ、年齢に応じた配慮
-- 栄養バランス（肉・魚・野菜）を週でバランスよく
-- 同じ食材を複数日で使い回せるよう工夫
-- 各料理に詳細な材料（4人分換算、目安量）と作り方を含める
-- 材料の category は次のいずれか: "meat_fish"（肉・魚介）、"vegetables"（野菜・果物）、"seasonings"（調味料）、"other"（その他）
-- 各料理に nutrition（1人前の概算）を含める: kcal（カロリー）, protein（タンパク質g）, fat（脂質g）, carb（炭水化物g）。整数で記載
-- ${singleDate ? '' : 'shoppingList は週全体の買い物リスト（同食材は集約）'}
-
-JSON スキーマに厳密に従って出力してください。`;
+  return { system, prompt };
 }
 
+// Claude/JSON Schema 標準（小文字 type）
 function makeDishSchema() {
-  const STR = { type: 'STRING' };
-  const INT = { type: 'INTEGER' };
+  const STR = { type: 'string' };
+  const INT = { type: 'integer' };
   return {
-    type: 'OBJECT',
+    type: 'object',
     properties: {
-      name: STR,
-      servings: STR,
-      time: STR,
+      name: { type: 'string', description: '料理名' },
+      servings: { type: 'string', description: '何人分か（例: 4人分）' },
+      time: { type: 'string', description: '調理時間目安（例: 25分）' },
       ingredients: {
-        type: 'ARRAY',
+        type: 'array',
         items: {
-          type: 'OBJECT',
+          type: 'object',
           properties: {
             name: STR,
             amount: STR,
-            category: { type: 'STRING', enum: ['meat_fish','vegetables','seasonings','other'] }
+            category: { type: 'string', enum: ['meat_fish','vegetables','seasonings','other'] }
           },
           required: ['name','amount','category']
         }
       },
-      steps: { type: 'ARRAY', items: STR },
+      steps: { type: 'array', items: { type: 'string' } },
       nutrition: {
-        type: 'OBJECT',
+        type: 'object',
         properties: { kcal: INT, protein: INT, fat: INT, carb: INT },
         required: ['kcal','protein','fat','carb']
       }
@@ -2042,9 +2104,8 @@ function makeDishSchema() {
 }
 
 // sidesCount: 'auto' | '0' | '1' | '2' | '3'
-// Gemini にちょうど N 品を出させるための minItems/maxItems を付与
 function buildSidesSchema(dishSchema, sidesCount, maxAuto = 2) {
-  const s = { type: 'ARRAY', items: dishSchema };
+  const s = { type: 'array', items: dishSchema };
   if (sidesCount === 'auto') {
     s.minItems = 1; s.maxItems = maxAuto;
   } else {
@@ -2055,10 +2116,10 @@ function buildSidesSchema(dishSchema, sidesCount, maxAuto = 2) {
 }
 
 function buildSchema(meals, singleDate, sidesCount = 'auto') {
-  const STR = { type: 'STRING' };
+  const STR = { type: 'string' };
   const dishSchema = makeDishSchema();
   const mealBlock = {
-    type: 'OBJECT',
+    type: 'object',
     properties: {
       main: dishSchema,
       sides: buildSidesSchema(dishSchema, sidesCount, 2)
@@ -2068,25 +2129,25 @@ function buildSchema(meals, singleDate, sidesCount = 'auto') {
   const dayProps = { date: STR, dayName: STR };
   const dayRequired = ['date','dayName'];
   meals.forEach(m => { dayProps[m] = mealBlock; dayRequired.push(m); });
-  const daySchema = { type:'OBJECT', properties: dayProps, required: dayRequired };
+  const daySchema = { type:'object', properties: dayProps, required: dayRequired };
 
-  const shoppingItem = { type:'OBJECT', properties:{ name: STR, amount: STR }, required:['name','amount'] };
+  const shoppingItem = { type:'object', properties:{ name: STR, amount: STR }, required:['name','amount'] };
   const root = {
-    type: 'OBJECT',
+    type: 'object',
     properties: {
-      days: { type: 'ARRAY', items: daySchema }
+      days: { type: 'array', items: daySchema }
     },
     required: ['days']
   };
 
   if (!singleDate) {
     root.properties.shoppingList = {
-      type: 'OBJECT',
+      type: 'object',
       properties: {
-        meat_fish: { type:'ARRAY', items: shoppingItem },
-        vegetables: { type:'ARRAY', items: shoppingItem },
-        seasonings: { type:'ARRAY', items: shoppingItem },
-        other: { type:'ARRAY', items: shoppingItem }
+        meat_fish: { type:'array', items: shoppingItem },
+        vegetables: { type:'array', items: shoppingItem },
+        seasonings: { type:'array', items: shoppingItem },
+        other: { type:'array', items: shoppingItem }
       }
     };
   }
