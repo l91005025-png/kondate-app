@@ -224,6 +224,13 @@
     .proposal-added { font-size:12px; color:#92400E; background:#FEF3C7; padding:8px 10px; border-radius:8px; margin-top:8px; }
     .proposal-added strong { color:#78350F; }
 
+    /* ============ コストヒントバナー ============ */
+    .cost-tip-banner { background: #FEF9C3; border: 1px solid #FACC15; color: #713F12; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 12px; display: flex; align-items: center; gap: 8px; line-height: 1.5; }
+    .cost-tip-banner .cost-tip-text { flex: 1; }
+    .cost-tip-banner b { color: #854D0E; }
+    .cost-tip-banner button { background: rgba(0,0,0,0.06); border: none; width: 24px; height: 24px; border-radius: 50%; font-size: 14px; color: #713F12; flex-shrink: 0; padding: 0; cursor: pointer; }
+    .cost-tip-banner button:hover { background: rgba(0,0,0,0.12); }
+
     /* ============ お気に入りピッカー ============ */
     .fav-pick-item { display: flex; align-items: center; gap: 10px; padding: 12px; background: #F8FAFC; border-radius: 10px; margin-bottom: 6px; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
     .fav-pick-item:hover { background: #F0FDF4; border-color: #BBF7D0; }
@@ -283,6 +290,11 @@
         </div>
       </div>
 
+      <div id="costTipBanner" class="cost-tip-banner hidden">
+        <span class="cost-tip-text">💡 気に入らない料理は <b>🔄(再生成 約2円)</b> や <b>📥(お気に入りから差し替え 0円)</b> で安く変更できます。全週やり直しは約30円かかります</span>
+        <button id="costTipClose" title="閉じる">×</button>
+      </div>
+
       <div id="menuContainer"></div>
 
       <div id="menuEmpty" class="empty-state hidden">
@@ -325,6 +337,14 @@
             <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="mealLunch" /> 昼食</label>
             <label style="display:flex; gap:6px; align-items:center;"><input type="checkbox" id="mealDinner" checked /> 夕食</label>
           </div>
+        </div>
+
+        <div class="form-group" style="background:#FEF9C3; border:1px solid #FACC15; padding:10px 12px; border-radius:10px;">
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; color:#713F12;">
+            <input type="checkbox" id="genLightMode" style="margin:0;" />
+            <span style="font-weight:700;">⚡ 軽量モード（主菜のみ・コスト約 1/3）</span>
+          </label>
+          <span class="hint" style="color:#854D0E;">まずは主菜だけサクッと7日分提案。気に入った日だけ後から「副菜を追加」できます（約10円で生成）</span>
         </div>
 
         <div class="grid-2">
@@ -373,8 +393,8 @@
           <textarea id="genExtraRequest" placeholder="例: 和食多めで、金曜はパーティー風"></textarea>
         </div>
 
-        <button class="btn" id="generateBtn">✨ 献立を生成する</button>
-        <p class="hint mt-8 text-center" style="color:#94A3B8; font-size:11px;">お気に入りに登録した料理が候補として優先されます</p>
+        <button class="btn" id="generateBtn">✨ 1週間分を生成する（約25〜30円）</button>
+        <p class="hint mt-8 text-center" style="color:#94A3B8; font-size:11px;">お気に入り料理が候補として優先 / 設定タブで今月の使用状況を確認できます</p>
       </div>
       </div><!-- /genModeWeek -->
 
@@ -502,6 +522,20 @@
       </div>
 
       <div class="card">
+        <h2>💰 今月のAPI使用状況</h2>
+        <p class="sub-title">家族全員のClaude API使用量を合計（毎月1日にリセット）</p>
+        <div id="usageSummary" style="background:#F0FDF4; padding:14px; border-radius:10px; text-align:center;">
+          <div style="font-size:28px; font-weight:700; color:#16A34A;" id="usageCostJpy">約 0 円</div>
+          <div style="font-size:12px; color:#64748B; margin-top:4px;" id="usageCostUsd">($0.00)</div>
+          <div style="font-size:12px; color:#64748B; margin-top:8px;" id="usageCallCount">生成回数: 0回</div>
+        </div>
+        <div style="font-size:11px; color:#94A3B8; margin-top:10px;" id="usageDetail"></div>
+        <div style="font-size:11px; color:#94A3B8; margin-top:6px;">
+          💡 ヒント: 全週生成 ≒ 約30円 / 1日再生成 ≒ 約3〜5円 / 1品再生成(🔄) ≒ 約1〜2円 / お気に入り差し替え(📥) ≒ 0円
+        </div>
+      </div>
+
+      <div class="card">
         <h2>🏠 家族コード</h2>
         <p class="sub-title">他の家族メンバーに共有する場合にお使いください</p>
         <div style="background:#F0FDF4; padding:14px; border-radius:10px; text-align:center; font-size:20px; font-weight:700; color:#16A34A; letter-spacing:1px;" id="familyCodeDisplay"></div>
@@ -585,7 +619,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signOut }
 import {
   getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
   collection, query, where, orderBy, limit, getDocs, onSnapshot,
-  serverTimestamp, deleteField
+  serverTimestamp, deleteField, increment
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 // ============================================================
@@ -787,6 +821,7 @@ onAuthStateChanged(auth, async (user) => {
   setCurrentWeek(getMondayOf(new Date()));
   subscribeFavorites();
   subscribeHistory();
+  subscribeUsage();
   subscribeSharedApiKey();
   checkApiKeyWarning();
 });
@@ -796,6 +831,7 @@ $('logoutBtn').addEventListener('click', async () => {
   if (state.unsubMenu) state.unsubMenu();
   if (state.unsubFavorites) state.unsubFavorites();
   if (state.unsubHistory) state.unsubHistory();
+  if (state.unsubUsage) state.unsubUsage();
   if (state.unsubSharedKey) state.unsubSharedKey();
   localStorage.removeItem('familyId');
   localStorage.removeItem('memberName');
@@ -821,6 +857,10 @@ function switchTab(name) {
 }
 
 $('openGenerateBtn').addEventListener('click', () => switchTab('generate'));
+$('costTipClose').addEventListener('click', () => {
+  localStorage.setItem('costTipClosedAt', String(Date.now()));
+  $('costTipBanner').classList.add('hidden');
+});
 $('goToSettingsFromWarn').addEventListener('click', (e) => { e.preventDefault(); switchTab('settings'); });
 
 // 生成タブのモード切替
@@ -1047,9 +1087,18 @@ function renderMenu() {
   c.innerHTML = '';
   if (!state.currentMenu || !state.currentMenu.days || state.currentMenu.days.length === 0) {
     $('menuEmpty').classList.remove('hidden');
+    $('costTipBanner').classList.add('hidden');
     return;
   }
   $('menuEmpty').classList.add('hidden');
+  // 直近7日間以内に閉じていなければバナー表示
+  const tipClosedAt = parseInt(localStorage.getItem('costTipClosedAt') || '0', 10);
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  if (Date.now() - tipClosedAt > sevenDaysMs) {
+    $('costTipBanner').classList.remove('hidden');
+  } else {
+    $('costTipBanner').classList.add('hidden');
+  }
 
   const today = todayStr();
   state.currentMenu.days.forEach((day, idx) => {
@@ -1087,6 +1136,7 @@ function renderMenu() {
     }
 
     inner += `<div class="day-actions">
+      ${state.currentMenu.lightMode ? `<button class="btn small secondary" data-action="add-sides" data-date="${day.date}" title="この日に副菜を追加生成">＋ 副菜を追加</button>` : ''}
       <button class="btn small ghost" data-action="regen-day" data-date="${day.date}">📅 この日全部</button>
     </div>`;
     card.innerHTML = inner;
@@ -1108,6 +1158,9 @@ function renderMenu() {
   });
   c.querySelectorAll('[data-action="regen-day"]').forEach(btn => {
     btn.addEventListener('click', () => regenerateDay(btn.dataset.date));
+  });
+  c.querySelectorAll('[data-action="add-sides"]').forEach(btn => {
+    btn.addEventListener('click', () => addSidesToDay(btn.dataset.date));
   });
   c.querySelectorAll('[data-action="regen-dish"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1337,6 +1390,37 @@ function subscribeHistory() {
   state.unsubHistory = onSnapshot(q, (snap) => {
     state.history = snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
     renderHistory();
+  });
+}
+
+// 月次使用量の購読（家族全体で共有）
+function subscribeUsage() {
+  if (state.unsubUsage) state.unsubUsage();
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const ref = doc(db, 'families', state.familyId, 'usage', monthKey);
+  state.unsubUsage = onSnapshot(ref, (snap) => {
+    if (!snap.exists()) {
+      $('usageCostJpy').textContent = '約 0 円';
+      $('usageCostUsd').textContent = '($0.00)';
+      $('usageCallCount').textContent = '生成回数: 0回';
+      $('usageDetail').textContent = '';
+      return;
+    }
+    const d = snap.data();
+    const costUsd = (d.costUsdMicro || 0) / 1_000_000;
+    const costJpy = costUsd * USD_TO_JPY;
+    $('usageCostJpy').textContent = `約 ${Math.round(costJpy)} 円`;
+    $('usageCostUsd').textContent = `($${costUsd.toFixed(3)})`;
+    $('usageCallCount').textContent = `生成回数: ${d.calls || 0}回`;
+    const total = (d.input_tokens || 0) + (d.output_tokens || 0) + (d.cache_read_tokens || 0) + (d.cache_write_tokens || 0);
+    $('usageDetail').innerHTML = `
+      入力: ${(d.input_tokens||0).toLocaleString()} tok ・
+      出力: ${(d.output_tokens||0).toLocaleString()} tok<br>
+      キャッシュ読: ${(d.cache_read_tokens||0).toLocaleString()} tok ・
+      キャッシュ書: ${(d.cache_write_tokens||0).toLocaleString()} tok<br>
+      モデル: ${d.lastModel || '?'} / 合計 ${total.toLocaleString()} tokens
+    `;
   });
 }
 
@@ -1689,14 +1773,17 @@ async function generateMenu() {
   if ($('mealDinner').checked) meals.push('dinner');
   if (meals.length === 0) { showToast('1つ以上の食事を選んでください', true); return; }
 
+  const lightMode = $('genLightMode').checked;
   const opts = {
     weekStart: fmtDate(weekStartDate),
     meals,
     time: $('genTime').value,
-    sidesCount: $('genSidesCount').value,  // 'auto' | '0' | '1' | '2' | '3'
+    // 軽量モード時は強制的に主菜のみ
+    sidesCount: lightMode ? '0' : $('genSidesCount').value,
     budget: $('genBudget').value,
     excludeOnce: $('genExcludeOnce').value.trim(),
-    extra: $('genExtraRequest').value.trim()
+    extra: $('genExtraRequest').value.trim(),
+    lightMode
   };
 
   try {
@@ -1787,7 +1874,9 @@ async function generateMenu() {
     const result = { days: allDays, shoppingList: aggregateShoppingList(allDays) };
     await saveMenu(opts.weekStart, result, opts);
     hideLoading();
-    showToast('献立を生成しました ✨');
+    showToast(opts.lightMode
+      ? '⚡ 軽量モードで生成しました\n気に入った日は「＋ 副菜を追加」で詳細化できます'
+      : '献立を生成しました ✨\n気に入らない料理は🔄や📥で安く差し替えできます');
     setCurrentWeek(new Date(opts.weekStart));
     switchTab('menu');
   } catch (e) {
@@ -1816,6 +1905,94 @@ function collectRecentDishes(weeksBack = 4, excludeWeekStart = null) {
     });
   });
   return Array.from(dishes);
+}
+
+// 軽量モードで生成された日に副菜を追加する（主菜は維持）
+async function addSidesToDay(date) {
+  const apiKey = loadApiKey();
+  if (!apiKey) { showToast('API キーが必要です', true); switchTab('settings'); return; }
+  const dayObj = state.currentMenu?.days?.find(d => d.date === date);
+  if (!dayObj) return;
+  const meals = ['breakfast','lunch','dinner'].filter(m => dayObj[m]);
+  if (meals.length === 0) return;
+  if (!confirm(`${fmtJP(date)} に副菜を追加生成しますか？（約2〜3円）`)) return;
+
+  // 重複させない料理リスト
+  const excludeSet = new Set(collectRecentDishes(4, state.currentMenu.weekStart));
+  state.currentMenu.days.forEach(d => {
+    ['breakfast','lunch','dinner'].forEach(m => {
+      if (!d[m]) return;
+      if (d[m].main?.name) excludeSet.add(d[m].main.name);
+      (d[m].sides||[]).forEach(s => s.name && excludeSet.add(s.name));
+    });
+  });
+  // 主菜の名前を持って「これに合う副菜2品」をリクエスト
+  const mainNames = meals.map(m => `${({breakfast:'朝食',lunch:'昼食',dinner:'夕食'}[m])}: ${dayObj[m].main?.name || ''}`).join('、');
+  const members = state.profile.members.map(m => `${m.name}（${m.age}/${m.role}）`).join('、');
+  const allExclude = state.profile.exclude || '';
+
+  const system = `あなたは家庭の献立アドバイザーです。主菜は既に決まっています。それに合う副菜を提案してください。output_sides ツールで返してください。
+
+【家族構成】${members}
+${state.profile.notes ? `【好み・備考】${state.profile.notes}` : ''}
+
+【ルール】
+- 既存の主菜と相性の良い副菜を、各食事ごとに2品ずつ提案
+- 子供がいる場合は辛さ控えめ
+- 4人分換算の詳細な材料と作り方を含める
+- 材料の category: "meat_fish"/"vegetables"/"seasonings"/"other"
+- nutrition（1人前の概算・整数）: kcal, protein, fat, carb
+- 材料名は標準表記で（玉ねぎ・にんじん・じゃがいも・大根・卵 など）`;
+
+  const prompt = `${fmtJP(date)} の主菜:
+${mainNames}
+
+${allExclude ? `【除外食材】${allExclude}\n` : ''}
+【同じ週で既出（重複させない）】
+${Array.from(excludeSet).slice(0, 80).join('、') || '（なし）'}
+
+各食事に対して sides を 2品ずつ生成してください。`;
+
+  // 出力スキーマ: { breakfast: [side,side], lunch: [...], dinner: [...] }
+  const dishSchema = makeDishSchema();
+  const sidesArray = { type: 'array', items: dishSchema, minItems: 2, maxItems: 2 };
+  const props = {};
+  const required = [];
+  meals.forEach(m => { props[m] = sidesArray; required.push(m); });
+  const schema = { type: 'object', properties: props, required };
+
+  try {
+    showLoading('副菜を考えています...');
+    const result = await claudeRequest({
+      system, prompt,
+      toolName: 'output_sides',
+      toolDescription: '主菜に合う副菜を食事ごとに返す',
+      toolSchema: schema,
+      temperature: 0.9,
+      maxTokens: 4096
+    });
+    // 該当日の各食事に sides をマージ
+    const newDays = state.currentMenu.days.map(d => {
+      if (d.date !== date) return d;
+      const newDay = { ...d };
+      meals.forEach(m => {
+        if (!result[m]) return;
+        newDay[m] = { ...newDay[m], sides: result[m] };
+      });
+      return newDay;
+    });
+    const newShoppingList = aggregateShoppingList(newDays);
+    await updateDoc(doc(db, 'families', state.familyId, 'menus', state.currentMenu.id), {
+      days: newDays,
+      shoppingList: newShoppingList,
+      shoppingChecked: {}
+    });
+    hideLoading();
+    showToast('副菜を追加しました');
+  } catch (e) {
+    hideLoading();
+    showToast('副菜追加失敗: ' + enhanceErr(e), true);
+  }
 }
 
 async function regenerateDay(date) {
@@ -2227,6 +2404,7 @@ async function saveMenu(weekStart, result, opts) {
     shoppingList: result.shoppingList || aggregateShoppingList(result.days),
     shoppingChecked: {},
     sidesCount: opts?.sidesCount || 'auto',
+    lightMode: !!opts?.lightMode,
     createdAt: serverTimestamp(),
     createdBy: state.memberName
   };
@@ -2239,6 +2417,42 @@ async function saveMenu(weekStart, result, opts) {
 
 // 503/429/500 のときは指数バックオフでリトライ
 const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1/messages';
+
+// モデルごとの料金 ($/MTok)。Anthropic 公式に準拠（2026-05 時点）
+const MODEL_PRICING = {
+  'claude-haiku-4-5':  { input: 1.0, output: 5.0, cache_write_5m: 1.25, cache_read: 0.1 },
+  'claude-sonnet-4-5': { input: 3.0, output: 15.0, cache_write_5m: 3.75, cache_read: 0.3 }
+};
+const USD_TO_JPY = 155;  // 為替レート目安（コスト表示の概算用）
+
+function calcCostUsd(model, usage) {
+  const p = MODEL_PRICING[model] || MODEL_PRICING['claude-haiku-4-5'];
+  const i = (usage.input_tokens || 0) * p.input / 1_000_000;
+  const o = (usage.output_tokens || 0) * p.output / 1_000_000;
+  const cr = (usage.cache_read_input_tokens || 0) * p.cache_read / 1_000_000;
+  const cw = (usage.cache_creation_input_tokens || 0) * p.cache_write_5m / 1_000_000;
+  return i + o + cr + cw;
+}
+
+// 月次の使用量集計を Firestore に記録（families/{familyId}/usage/{YYYY-MM}）
+async function logApiUsage(model, usage) {
+  if (!state.familyId) return;
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const costUsd = calcCostUsd(model, usage);
+  const ref = doc(db, 'families', state.familyId, 'usage', monthKey);
+  // increment で原子的に加算（並列生成でも正確）
+  await setDoc(ref, {
+    calls: increment(1),
+    input_tokens: increment(usage.input_tokens || 0),
+    output_tokens: increment(usage.output_tokens || 0),
+    cache_read_tokens: increment(usage.cache_read_input_tokens || 0),
+    cache_write_tokens: increment(usage.cache_creation_input_tokens || 0),
+    costUsdMicro: increment(Math.round(costUsd * 1_000_000)),  // 浮動小数点誤差を避けるため整数化
+    lastUpdated: serverTimestamp(),
+    lastModel: model
+  }, { merge: true });
+}
 const ANTHROPIC_VERSION = '2023-06-01';
 
 async function fetchWithRetry(url, opts, maxRetries = 5) {
@@ -2329,6 +2543,8 @@ async function claudeRequest({ system, prompt, toolName, toolDescription, toolSc
   // 使用量ログ（コスト把握用）
   if (data.usage) {
     console.log('[Claude] usage:', data.usage, 'stop:', data.stop_reason);
+    // Firestore に非同期で記録（失敗しても本処理は止めない）
+    logApiUsage(model, data.usage).catch(e => console.warn('[logApiUsage]', e));
   }
   const toolUse = (data.content || []).find(c => c.type === 'tool_use');
   if (!toolUse) {
@@ -2414,7 +2630,9 @@ ${favTags ? `【家族のお気に入り料理（候補として優先的に検�
 【共通ルール】
 - 各食事は main（主菜）1品 + sides（副菜）${sidesCountLabel(opts.sidesCount)}
 - 子供がいる場合は辛さ控えめ、年齢に応じた配慮
-- 各料理に詳細な材料（4人分換算、目安量）と作り方を含める
+${opts.lightMode
+  ? '- 【軽量モード】各料理の材料は主要なもの5〜6品まで、作り方は3〜5ステップに簡潔化（後で詳細化可能）'
+  : '- 各料理に詳細な材料（4人分換算、目安量）と作り方を含める'}
 - 材料の category: "meat_fish"（肉・魚介）/ "vegetables"（野菜・果物）/ "seasonings"（調味料）/ "other"（その他）
 - 各料理に nutrition（1人前の概算・整数）: kcal, protein(g), fat(g), carb(g)
 

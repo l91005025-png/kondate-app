@@ -35,6 +35,11 @@ service cloud.firestore {
       match /secrets/{docId} {
         allow read, write: if isSignedIn();
       }
+
+      // usage/{YYYY-MM}: 月次API使用量集計（コスト可視化用）
+      match /usage/{monthKey} {
+        allow read, write: if isSignedIn();
+      }
     }
   }
 }
